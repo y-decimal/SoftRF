@@ -131,6 +131,27 @@ namespace{
      void do_mavlink_traffic(mavlink_message_t * pmsg);
 } // ~namespace
 
+void send_mavlink_heartbeat()
+{
+   static uint32_t heartbeat_send_ts = 0;
+
+   uint32_t now = millis();
+   if (now - heartbeat_send_ts < MAVLINK_HEARTBEAT_INTERVAL_MS) {
+      return;
+   }
+
+   heartbeat_send_ts = now;
+
+   mavlink_msg_heartbeat_send(
+      MAVLINK_COMM_0,
+      MAV_TYPE_ADSB,
+      MAV_AUTOPILOT_INVALID,
+      0,
+      0,
+      MAV_STATE_ACTIVE
+   );
+}
+
 void read_mavlink()
 {
 
@@ -362,7 +383,7 @@ namespace {
                                 altitude_type, alt, heading,
                                 hor_velocity, ver_velocity, callsign,
                                 emitter_type,  tslc,  flags,  squawk);
-   }
+   }  
 
    void do_mavlink_traffic(mavlink_message_t * pmsg)
    {

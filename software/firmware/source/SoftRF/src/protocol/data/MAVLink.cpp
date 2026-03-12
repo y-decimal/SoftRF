@@ -38,6 +38,7 @@ void MAVLink_setup()
 void PickMAVLinkFix()
 {
   read_mavlink();
+  send_mavlink_heartbeat();
 }
 
 void MAVLinkTimeSync()

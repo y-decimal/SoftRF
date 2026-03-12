@@ -26,10 +26,12 @@
 
 #define MAVLINK_COMM_NUM_BUFFERS 1
 #define MAVLINK_USE_CONVENIENCE_FUNCTIONS
+#define MAVLINK_HEARTBEAT_INTERVAL_MS  1000UL
 
 #define MAVLINK10
 
 uint32_t get_num_heartbeats();
+void send_mavlink_heartbeat();
 void read_mavlink();
 void write_mavlink( uint32_t addr, float latitude, float longtitude,
                     float altitude, float course, float h_speed, float v_speed,
