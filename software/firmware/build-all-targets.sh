@@ -6,7 +6,7 @@
 set -e
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-PROJECT_DIR="$SCRIPT_DIR/SoftRF"
+PROJECT_DIR="$SCRIPT_DIR/source/SoftRF"
 OUTPUT_BASE="${1:-.}"
 
 # Find Python site-packages path for pyserial (in venv if available, otherwise system)
