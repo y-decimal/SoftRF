@@ -1220,6 +1220,11 @@ static void RP2xxx_Button_fini()
 #endif /* USE_BOOTSEL_BUTTON */
 }
 
+static void RP2xxx_TTS(char *message)
+{
+
+}
+
 static void RP2xxx_USB_setup()
 {
 #if !defined(ARDUINO_ARCH_MBED)
@@ -1602,6 +1607,7 @@ const SoC_ops_t RP2xxx_ops = {
   RP2xxx_Button_setup,
   RP2xxx_Button_loop,
   RP2xxx_Button_fini,
+  RP2xxx_TTS,
   NULL
 };
 

@@ -50,7 +50,7 @@
 #else
 #define UATSerial Serial
 #endif /* ARDUINO_USB_CDC_ON_BOOT */
-#elif defined(CONFIG_IDF_TARGET_ESP32S3)
+#elif defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
 #define UATSerial Serial2
 #define SA8X8_Serial Serial2
 #if ARDUINO_USB_CDC_ON_BOOT
@@ -105,6 +105,7 @@
 #elif !defined(CONFIG_IDF_TARGET_ESP32C3) && \
     !defined(CONFIG_IDF_TARGET_ESP32C5) &&   \
     !defined(CONFIG_IDF_TARGET_ESP32S3) &&   \
+    !defined(CONFIG_IDF_TARGET_ESP32S31) &&  \
     !defined(CONFIG_IDF_TARGET_ESP32C6) &&   \
     !defined(CONFIG_IDF_TARGET_ESP32C61) &&  \
     !defined(CONFIG_IDF_TARGET_ESP32H2) &&   \
@@ -177,7 +178,7 @@ static inline color_t uni_Color(uint8_t r, uint8_t g, uint8_t b)
 #define SOC_GPIO_PIN_LED 25
 #elif defined(CONFIG_IDF_TARGET_ESP32S2)
 #define SOC_GPIO_PIN_LED 7
-#elif defined(CONFIG_IDF_TARGET_ESP32S3)
+#elif defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
 #define SOC_GPIO_PIN_LED 2 /* 48 ? */
 #elif defined(CONFIG_IDF_TARGET_ESP32C2)
 #define SOC_GPIO_PIN_LED SOC_UNUSED_PIN /* TBD */
@@ -246,13 +247,13 @@ static inline color_t uni_Color(uint8_t r, uint8_t g, uint8_t b)
 
 #if defined(CONFIG_IDF_TARGET_ESP32S2)
 #define LV_HOR_RES (135) // Horizontal
-#elif defined(CONFIG_IDF_TARGET_ESP32S3)
+#elif defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
 #define LV_HOR_RES (80) // Horizontal
 #else
 #define LV_HOR_RES (240) // Horizontal
 #endif
 
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
 #define LV_VER_RES (160) // vertical
 #else
 #define LV_VER_RES (240) // vertical
@@ -307,6 +308,7 @@ enum esp32_board_id
 {
   ESP32_DEVKIT,
   ESP32_S3_DEVKIT,
+  ESP32_S31_DEVKIT,
   ESP32_C2_DEVKIT,
   ESP32_C3_DEVKIT,
   ESP32_C5_DEVKIT,
@@ -422,7 +424,7 @@ struct rst_info
 #define USE_TFT
 #define USE_NMEA_CFG
 #define USE_BASICMAC
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
 #define USE_SKYVIEW_CFG
 #define USE_RADIOLIB
 // #define EXCLUDE_LR11XX
@@ -432,6 +434,7 @@ struct rst_info
 #define EXCLUDE_SI446X
 #define EXCLUDE_SX1231
 #define EXCLUDE_SX1280
+#define USE_FEM
 #elif defined(CONFIG_IDF_TARGET_ESP32C3) || \
     defined(CONFIG_IDF_TARGET_ESP32C5) ||   \
     defined(CONFIG_IDF_TARGET_ESP32C6) ||   \
@@ -496,7 +499,9 @@ struct rst_info
 
 #define EXCLUDE_UATM
 
-#if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S2) || \
+    defined(CONFIG_IDF_TARGET_ESP32S3) || \
+    defined(CONFIG_IDF_TARGET_ESP32S31)
 #define EXCLUDE_NRF905
 
 /* Experimental */
@@ -581,7 +586,7 @@ extern const USB_Device_List_t supported_USB_devices[];
 #endif /* SX || CX || H2 || H4 || P4 */
 #endif /* CONFIG_IDF_TARGET_ESP32 */
 
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
 #define EXCLUDE_EGM96
 // #undef USE_NMEALIB
 #define USE_U10_EXT
@@ -623,8 +628,9 @@ extern const USB_Device_List_t supported_USB_devices[];
 // #define EXCLUDE_VOICE_MESSAGE
 #define USE_OLED
 // #define USE_USB_HOST
+// #define USE_LIB_RTLSDR
 // #define USE_DSI
-// #define USE_SENSORLIB_TOUCH
+#define USE_SENSORLIB_TOUCH
 #define USE_SKYVIEW_CFG
 #endif /* P4 */
 
@@ -636,9 +642,9 @@ extern const USB_Device_List_t supported_USB_devices[];
 
 #if defined(USE_OLED)
 #define U8X8_OLED_I2C_BUS_TYPE U8X8_SSD1306_128X64_NONAME_2ND_HW_I2C
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
 #define ENABLE_OLED_TEXT_PAGE
-#endif /* CONFIG_IDF_TARGET_ESP32S3 */
+#endif /* CONFIG_IDF_TARGET_ESP32S3-S31 */
 #endif /* USE_OLED */
 
 #if defined(USE_EPAPER)

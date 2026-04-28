@@ -517,6 +517,11 @@ static void AVR_Button_fini()
 #endif /* SOC_GPIO_PIN_BUTTON != SOC_UNUSED_PIN */
 }
 
+static void AVR_TTS(char *message)
+{
+
+}
+
 static void AVR_USB_setup()
 {
   if (USBSerial && USBSerial != Serial) {
@@ -624,6 +629,7 @@ const SoC_ops_t AVR_ops = {
   AVR_Button_setup,
   AVR_Button_loop,
   AVR_Button_fini,
+  AVR_TTS,
   NULL
 };
 

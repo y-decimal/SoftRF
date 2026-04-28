@@ -81,7 +81,12 @@ void JSON_Export()
 
       distance = Container[i].distance;
 
-      if (distance < ALARM_ZONE_NONE) {
+      float max_distance = Container[i].protocol == RF_PROTOCOL_ADSB_1090 ||
+                           Container[i].protocol == RF_PROTOCOL_ADSB_UAT  ||
+                           Container[i].protocol == RF_PROTOCOL_FANET ?
+                           ALARM_ZONE_NONE_EXT : ALARM_ZONE_NONE;
+
+      if (distance < max_distance) {
 
         char hexbuf[8];
         char callsign[8+1];

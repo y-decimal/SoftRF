@@ -98,4 +98,4 @@ class BLEDfuSecure : public BLEService
     virtual err_t begin(void);
 };
 
-extern IODev_ops_t nRF52_Bluetooth_ops;
+extern IODev_ops_t nRF5x_Bluetooth_ops;

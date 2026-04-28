@@ -460,6 +460,11 @@ static void LPC43_Button_fini()
   /* TODO */
 }
 
+static void LPC43_TTS(char *message)
+{
+
+}
+
 void LPC43_USB_CDC_Sync()
 {
   unsigned long ms = millis();
@@ -591,6 +596,7 @@ const SoC_ops_t LPC43_ops = {
   LPC43_Button_setup,
   LPC43_Button_loop,
   LPC43_Button_fini,
+  LPC43_TTS,
   NULL
 };
 

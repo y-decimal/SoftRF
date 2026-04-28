@@ -89,6 +89,7 @@ typedef struct SoC_ops_struct {
   void (*Button_setup)();
   void (*Button_loop)();
   void (*Button_fini)();
+  void (*TTS)(char *);
   DB_ops_t *ADB_ops;
 } SoC_ops_t;
 
@@ -99,6 +100,7 @@ enum
 	SOC_ESP32,
 	SOC_ESP32S2,
 	SOC_ESP32S3,
+	SOC_ESP32S31,
 	SOC_ESP32C2,
 	SOC_ESP32C3,
 	SOC_ESP32C5,

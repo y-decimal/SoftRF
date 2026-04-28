@@ -591,6 +591,11 @@ static void ASR66_Button_fini()
 #endif /* SOC_GPIO_PIN_BUTTON != SOC_UNUSED_PIN */
 }
 
+static void ASR66_TTS(char *message)
+{
+
+}
+
 const SoC_ops_t ASR66_ops = {
   SOC_ASR66,
   "ASR66",
@@ -636,6 +641,7 @@ const SoC_ops_t ASR66_ops = {
   ASR66_Button_setup,
   ASR66_Button_loop,
   ASR66_Button_fini,
+  ASR66_TTS,
   NULL
 };
 

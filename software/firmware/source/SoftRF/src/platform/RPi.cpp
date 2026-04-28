@@ -1072,6 +1072,11 @@ static void RPi_Button_fini()
   /* TODO */
 }
 
+static void RPi_TTS(char *message)
+{
+
+}
+
 const SoC_ops_t RPi_ops = {
   SOC_RPi,
   "RPi",
@@ -1117,6 +1122,7 @@ const SoC_ops_t RPi_ops = {
   RPi_Button_setup,
   RPi_Button_loop,
   RPi_Button_fini,
+  RPi_TTS,
   NULL
 };
 
@@ -1373,7 +1379,7 @@ void relay_loop()
                  Container[i].latitude  != 0.0 &&
                  Container[i].longitude != 0.0 &&
                  Container[i].altitude  != 0.0 &&
-                 Container[i].distance < (ALARM_ZONE_NONE * 2) ) {
+                 Container[i].distance < ALARM_ZONE_NONE_EXT ) {
 
         fo = Container[i];
         fo.timestamp = now(); /* GNSS date&time */

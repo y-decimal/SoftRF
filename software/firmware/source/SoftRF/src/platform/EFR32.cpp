@@ -658,6 +658,11 @@ static void EFR32_Button_fini()
 #endif /* SOC_GPIO_PIN_BUTTON != SOC_UNUSED_PIN */
 }
 
+static void EFR32_TTS(char *message)
+{
+
+}
+
 const SoC_ops_t EFR32_ops = {
   SOC_EFR32,
   "EFR32",
@@ -707,6 +712,7 @@ const SoC_ops_t EFR32_ops = {
   EFR32_Button_setup,
   EFR32_Button_loop,
   EFR32_Button_fini,
+  EFR32_TTS,
   NULL
 };
 

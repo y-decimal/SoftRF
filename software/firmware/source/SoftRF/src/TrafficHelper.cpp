@@ -21,10 +21,14 @@
 #include "driver/RF.h"
 #include "driver/GNSS.h"
 #include "driver/Sound.h"
+#include "driver/EPD.h"
 #include "ui/Web.h"
 #include "protocol/radio/Legacy.h"
 
 unsigned long UpdateTrafficTimeMarker = 0;
+
+static unsigned long Traffic_Voice_TimeMarker = 0;
+static uint32_t Traffic_Voice_ID_prev = 0;
 
 ufo_t fo, Container[MAX_TRACKING_OBJECTS], EmptyFO;
 traffic_by_dist_t traffic_by_dist[MAX_TRACKING_OBJECTS];
@@ -183,6 +187,142 @@ bool Traffic_Add(ufo_t *fop)
   return false;
 }
 
+static void Traffic_Voice()
+{
+  int j=0;
+  int bearing;
+  char message[80];
+
+  for (int i=0; i < MAX_TRACKING_OBJECTS; i++) {
+    if (Container[i].addr && (now() - Container[i].timestamp) <= VOICE_EXPIRATION_TIME) {
+
+      traffic_by_dist[j].fop = &Container[i];
+      traffic_by_dist[j].distance = Container[i].distance;
+      j++;
+    }
+  }
+
+  if (j > 0 && traffic_by_dist[0].fop->addr != Traffic_Voice_ID_prev) {
+
+    const char *u_dist, *u_alt;
+    float voc_dist;
+    int   voc_alt;
+    const char *where;
+    char how_far[32];
+    char elev[32];
+
+    qsort(traffic_by_dist, j, sizeof(traffic_by_dist_t), traffic_cmp_by_distance);
+
+    bearing = (int) traffic_by_dist[0].fop->bearing;
+
+    /* This bearing is always relative to current ground track */
+//  if (settings->m.orientation == DIRECTION_TRACK_UP) {
+      bearing -= ThisAircraft.course;
+//  }
+
+    if (bearing < 0) {
+      bearing += 360;
+    }
+
+    int oclock = ((bearing + 15) % 360) / 30;
+    float Relative_Vertical = traffic_by_dist[0].fop->altitude -
+                              ThisAircraft.altitude;
+
+    switch (oclock)
+    {
+    case 0:
+      where = "ahead";
+      break;
+    case 1:
+      where = "1oclock";
+      break;
+    case 2:
+      where = "2oclock";
+      break;
+    case 3:
+      where = "3oclock";
+      break;
+    case 4:
+      where = "4oclock";
+      break;
+    case 5:
+      where = "5oclock";
+      break;
+    case 6:
+      where = "6oclock";
+      break;
+    case 7:
+      where = "7oclock";
+      break;
+    case 8:
+      where = "8oclock";
+      break;
+    case 9:
+      where = "9oclock";
+      break;
+    case 10:
+      where = "10oclock";
+      break;
+    case 11:
+      where = "11oclock";
+      break;
+    }
+
+    switch (ui->units)
+    {
+    case UNITS_IMPERIAL:
+      u_dist = "nautical miles";
+      u_alt  = "feet";
+      voc_dist = (traffic_by_dist[0].distance * _GPS_MILES_PER_METER) /
+                  _GPS_MPH_PER_KNOT;
+      voc_alt  = abs((int) (Relative_Vertical * _GPS_FEET_PER_METER));
+      break;
+    case UNITS_MIXED:
+      u_dist = "kms";
+      u_alt  = "feet";
+      voc_dist = traffic_by_dist[0].distance / 1000.0;
+      voc_alt  = abs((int) (Relative_Vertical * _GPS_FEET_PER_METER));
+      break;
+    case UNITS_METRIC:
+    default:
+      u_dist = "kms";
+      u_alt  = "metres";
+      voc_dist = traffic_by_dist[0].distance / 1000.0;
+      voc_alt  = abs((int) Relative_Vertical);
+      break;
+    }
+
+    if (voc_dist < 1.0) {
+      strcpy(how_far, "near");
+    } else {
+      if (voc_dist > 9.0) {
+        voc_dist = 9.0;
+      }
+      snprintf(how_far, sizeof(how_far), "%u %s", (int) voc_dist, u_dist);
+    }
+
+    if (voc_alt < 100) {
+      strcpy(elev, "near");
+    } else {
+      if (voc_alt > 500) {
+        voc_alt = 500;
+      }
+
+      snprintf(elev, sizeof(elev), "%u hundred %s %s",
+        (voc_alt / 100), u_alt,
+        Relative_Vertical > 0 ? "above" : "below");
+    }
+
+    snprintf(message, sizeof(message),
+                "traffic %s distance %s altitude %s",
+                where, how_far, elev);
+
+    SoC->TTS(message);
+
+    Traffic_Voice_ID_prev = traffic_by_dist[0].fop->addr;
+  }
+}
+
 void ParseData()
 {
     size_t rx_size = RF_Payload_Size(settings->rf_protocol);
@@ -236,6 +376,9 @@ void Traffic_setup()
     Alarm_Level = &Alarm_Distance;
     break;
   }
+
+  UpdateTrafficTimeMarker  = millis();
+  Traffic_Voice_TimeMarker = millis();
 }
 
 void Traffic_loop()
@@ -258,6 +401,16 @@ void Traffic_loop()
     }
 
     UpdateTrafficTimeMarker = millis();
+  }
+
+  if (isTimeToVoice()) {
+#if defined(USE_EPAPER) || defined(USE_DSI)
+    if (ui->voice != VOICE_OFF) {
+      Traffic_Voice();
+    }
+#endif
+
+    Traffic_Voice_TimeMarker = millis();
   }
 }
 

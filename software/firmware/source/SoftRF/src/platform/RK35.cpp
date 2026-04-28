@@ -1110,6 +1110,11 @@ static void RK35_Button_fini()
   /* TODO */
 }
 
+static void RK35_TTS(char *message)
+{
+
+}
+
 const SoC_ops_t RK35_ops = {
   SOC_RK3506,
   "RK3506",
@@ -1155,6 +1160,7 @@ const SoC_ops_t RK35_ops = {
   RK35_Button_setup,
   RK35_Button_loop,
   RK35_Button_fini,
+  RK35_TTS,
   NULL
 };
 
@@ -1434,7 +1440,7 @@ void relay_loop()
                  Container[i].latitude  != 0.0 &&
                  Container[i].longitude != 0.0 &&
                  Container[i].altitude  != 0.0 &&
-                 Container[i].distance < (ALARM_ZONE_NONE * 2) ) {
+                 Container[i].distance < ALARM_ZONE_NONE_EXT ) {
 
         fo = Container[i];
         fo.timestamp = now(); /* GNSS date&time */

@@ -873,6 +873,11 @@ static void CH32_Button_fini()
 #endif /* SOC_GPIO_PIN_BUTTON != SOC_UNUSED_PIN */
 }
 
+static void CH32_TTS(char *message)
+{
+
+}
+
 #if defined(USE_TINYUSB)
 static void CH32_USB_setup() {
 #if !defined(USBCON)
@@ -983,6 +988,7 @@ const SoC_ops_t CH32_ops = {
   CH32_Button_setup,
   CH32_Button_loop,
   CH32_Button_fini,
+  CH32_TTS,
   NULL
 };
 

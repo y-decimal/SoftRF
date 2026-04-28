@@ -4831,6 +4831,22 @@ static const Module::RfSwitchMode_t rfswitch_table_MXD8721[] = {
     LR2021::MODE_END_OF_TABLE,
 };
 
+static const uint32_t rfswitch_dio_pins_seeed_pro[] = {
+    RADIOLIB_NC, RADIOLIB_NC,
+    RADIOLIB_NC, RADIOLIB_NC,
+    RADIOLIB_NC
+};
+
+static const Module::RfSwitchMode_t rfswitch_table_seeed_pro[] = {
+    // mode
+    { LR2021::MODE_STBY,   { } },
+    { LR2021::MODE_RX,     { } },
+    { LR2021::MODE_TX,     { } },
+    { LR2021::MODE_RX_HF,  { } },
+    { LR2021::MODE_TX_HF,  { } },
+    LR2021::MODE_END_OF_TABLE,
+};
+
 // this function is called when a complete packet
 // is received by the module
 // IMPORTANT: this function MUST be 'void' type
@@ -4893,9 +4909,10 @@ static bool lr2021_probe()
   pinMode(lmic_pins.nss, INPUT);
   RadioSPI.end();
 
-  if (major == 0x01 && minor >= 0x18) {
+  if ((major == 0x01 && minor >= 0x18) || /* LR2021:    0x01 0x18 */
+      (major == 0x02 && minor == 0x00)) { /* LR2012/22: 0x02 0x00 */
 
-    if (major_reset == 0x01) {
+    if (major_reset == 0x01 || major_reset == 0x02) {
       RF_SX12XX_RST_is_connected = false;
     }
 #if 0
@@ -5053,6 +5070,10 @@ static void lr20xx_setup()
   case SOFTRF_MODEL_ACADEMY:
     radio_g4->irqDioNum = 8; /* DIO8 as IRQ on WIO-2021 */
     Vtcxo = 0.0; /* XTAL */
+    break;
+  case SOFTRF_MODEL_CARD:
+    radio_g4->irqDioNum = 8; /* DIO8 as IRQ on T1000-E PRO */
+    Vtcxo = 1.6;
     break;
   default:
     radio_g4->irqDioNum = 11; /* LR2021 DIO11 as IRQ */
@@ -5463,18 +5484,40 @@ static void lr20xx_setup()
 
   switch (hw_info.model)
   {
+  case SOFTRF_MODEL_CARD:
+    radio_g4->setRfSwitchTable(rfswitch_dio_pins_seeed_pro,
+                               rfswitch_table_seeed_pro);
+    break;
+
+  case SOFTRF_MODEL_ACADEMY:
+    if (SoC->getChipId() == 0x21A44298 || SoC->getChipId() == 0xFCE0D9E0) {
+      radio_g4->setRfSwitchTable(rfswitch_dio_pins_MXD8721,
+                                 rfswitch_table_MXD8721);
+    } else {
+      // Wio-LR202x Module @ 868/915M - Switchless design
+      // radio_g4->setRfSwitchTable(rfswitch_dio_pins_seeed_wio,
+      //                            rfswitch_table_seeed_wio);
+    }
+    break;
+
   case SOFTRF_MODEL_BADGE:
   case SOFTRF_MODEL_PRIME_MK3:
   default:
-    radio_g4->setRfSwitchTable(rfswitch_dio_pins_MXD8721, rfswitch_table_MXD8721);
-    rl_state = radio_g4->setOutputPower(txpow);
+    radio_g4->setRfSwitchTable(rfswitch_dio_pins_MXD8721,
+                               rfswitch_table_MXD8721);
     break;
   }
+  rl_state = radio_g4->setOutputPower(txpow);
 
   rl_state = radio_g4->setRxBoostedGainMode(high ? RADIOLIB_LR2021_RX_BOOST_HF :
                                                    RADIOLIB_LR2021_RX_BOOST_LF);
   radio_g4->setPacketReceivedAction(lr20xx_receive_handler);
 }
+
+#define ES1090_MONITOR_INTERVAL 30000
+
+static unsigned long lr20xx_rx_monitor_marker = 0;
+static unsigned long lr20xx_last_rx_marker    = 0;
 
 static bool lr20xx_receive()
 {
@@ -5483,6 +5526,16 @@ static bool lr20xx_receive()
 
   if (settings->power_save & POWER_SAVE_NORECEIVE) {
     return success;
+  }
+
+  if (rl_protocol->type     == RF_PROTOCOL_ADSB_1090 &&
+      lr20xx_receive_active == true                  &&
+      millis() - lr20xx_rx_monitor_marker > ES1090_MONITOR_INTERVAL) {
+    if (millis() - lr20xx_last_rx_marker > (ES1090_MONITOR_INTERVAL / 2)) {
+      rl_state = radio_g4->finishReceive();
+      lr20xx_receive_active = false;
+    }
+    lr20xx_rx_monitor_marker = millis();
   }
 
   if (!lr20xx_receive_active) {
@@ -5518,6 +5571,8 @@ static bool lr20xx_receive()
 
         u1_t crc8, pkt_crc8;
         u2_t crc16, pkt_crc16;
+
+        lr20xx_last_rx_marker = millis();
 
         RadioLib_DataPacket *RL_rxPacket_ptr = &RL_rxPacket;
 
@@ -5623,34 +5678,42 @@ static bool lr20xx_receive()
                           mm.msgtype, mm.msgbits, mm.aa1, mm.aa2, mm.aa3,
                           (int) radio_g4->getRSSI(true));
 #endif
+            if (mm.msgtype == 17 &&
+                ((mm.metype >= 1 && mm.metype <= 4)  ||
+                 (mm.metype >= 9 && mm.metype <= 18) ||
+                 (mm.metype == 19)) ) {
+              size = mm.msgbits >> 3;
 
-            size = mm.msgbits >> 3;
+              if (size > sizeof(RxBuffer)) {
+                size = sizeof(RxBuffer);
+              }
 
-            if (size > sizeof(RxBuffer)) {
-              size = sizeof(RxBuffer);
-            }
-
-            if (size > 0) {
+              if (size > 0) {
 #if OPT_DF17 == 0
-              memcpy(RxBuffer, RL_rxPacket_ptr->payload, size);
+                memcpy(RxBuffer, RL_rxPacket_ptr->payload, size);
 #endif /* OPT_DF17 == 0 */
 #if OPT_DF17 == 1 || OPT_DF17 == 2
-              memcpy(RxBuffer, buf, size);
+                memcpy(RxBuffer, buf, size);
 #endif /* OPT_DF17 == 1 | 2 */
 
-              success = true;
-            }
+                success = true;
+              }
 
-            int acfts_in_sight = 0;
-            struct mode_s_aircraft *a = rl_mode_s_state.aircrafts;
+              int acfts_in_sight = 0;
+              struct mode_s_aircraft *a = rl_mode_s_state.aircrafts;
 
-            while (a) {
-              acfts_in_sight++;
-              a = a->next;
-            }
+              while (a) {
+                acfts_in_sight++;
+                a = a->next;
+              }
 
-            if (acfts_in_sight < MAX_TRACKING_OBJECTS) {
-              interactiveReceiveData(&rl_mode_s_state, &mm);
+#if 0
+              Serial.printf("acfts_in_sight %d\r\n", acfts_in_sight);
+#endif
+
+              if (acfts_in_sight < (4 * MAX_TRACKING_OBJECTS)) {
+                interactiveReceiveData(&rl_mode_s_state, &mm);
+              }
             }
           }
           break;

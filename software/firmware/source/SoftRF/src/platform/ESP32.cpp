@@ -212,7 +212,9 @@ char UDPpacketBuffer[UDP_PACKET_BUFSIZE];
 #include "../driver/Ethernet.h"
 #endif /* EXCLUDE_ETHERNET */
 
-#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32P4)
+#if defined(CONFIG_IDF_TARGET_ESP32S3)  || \
+    defined(CONFIG_IDF_TARGET_ESP32S31) || \
+    defined(CONFIG_IDF_TARGET_ESP32P4)
 //#define SPI_DRIVER_SELECT 3
 #include <Adafruit_SPIFlash.h>
 #include "../driver/EPD.h"
@@ -381,10 +383,16 @@ extern int32_t IMU_g_x10;
 
 #if !defined(EXCLUDE_MAG)
 #include <SensorQMC6310.hpp>
+#if SENSORLIB_VERSION >= SENSORLIB_VERSION_VAL(0, 4, 1)
+#include <SensorQMC6309.hpp>
+#endif /* (0, 4, 1) */
 
 #define MAG_UPDATE_INTERVAL 500 /* ms */
 
 SensorQMC6310 mag_qmc6310;
+#if SENSORLIB_VERSION >= SENSORLIB_VERSION_VAL(0, 4, 1)
+SensorQMC6309 mag_qmc6309;
+#endif /* (0, 4, 1) */
 
 static unsigned long MAG_Time_Marker = 0;
 
@@ -446,6 +454,10 @@ bool ESP32_R22_workaround = false;
 #define MAX_FILENAME_LEN      64
 #define WAV_FILE_PREFIX       "/Audio/"
 #define WAV_FILE_SUFFIX       ".wav"
+
+#define VOICE1_SUBDIR         "voice1/"
+#define VOICE2_SUBDIR         "voice2/"
+#define VOICE3_SUBDIR         "voice3/"
 
 AudioGeneratorWAV    *Audio_Gen;
 AudioFileSourceSdFat *Audio_Source;
@@ -529,6 +541,9 @@ esp_err_t es8311_codec_init(const unsigned int i2c_num) {
 #include <GaugeBQ27220.hpp>
 #include <ICM_20948.h>
 #include <TouchDrvGT911.hpp>
+#if SENSORLIB_VERSION >= SENSORLIB_VERSION_VAL(0, 4, 1)
+#include <HapticDrivers.hpp>
+#endif /* (0, 4, 1) */
 
 #if defined(TDP4_ES8311_IIC) && TDP4_ES8311_IIC == 2
 TwoWire Wire2 = TwoWire(2);
@@ -537,6 +552,11 @@ TwoWire Wire2 = TwoWire(2);
 ExtensionIOXL9555 *xl9535 = nullptr;
 GaugeBQ27220      bq_27220;
 ICM_20948_I2C     imu_icm20948;
+#if SENSORLIB_VERSION >= SENSORLIB_VERSION_VAL(0, 4, 1)
+HapticDriver_AW86224 vibra;
+#endif /* (0, 4, 1) */
+
+static bool ESP32_has_vibra = false;
 
 #include "../driver/GNSS.h"
 #if defined(USE_DSI)
@@ -556,8 +576,9 @@ Adafruit_NeoPixel XR1_Pixel = Adafruit_NeoPixel(1, SOC_GPIO_PIN_ELRS_PIXEL,
 #endif /* CONFIG_IDF_TARGET_ESP32C3 */
 
 #if CONFIG_TINYUSB_ENABLED && \
-    (defined(CONFIG_IDF_TARGET_ESP32S2) || \
-     defined(CONFIG_IDF_TARGET_ESP32S3) || \
+    (defined(CONFIG_IDF_TARGET_ESP32S2)  || \
+     defined(CONFIG_IDF_TARGET_ESP32S3)  || \
+     defined(CONFIG_IDF_TARGET_ESP32S31) || \
      defined(CONFIG_IDF_TARGET_ESP32P4))
 #include <USB.h>
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
@@ -716,7 +737,7 @@ static void ESP32_setup()
 #elif defined(CONFIG_IDF_TARGET_ESP32S2)
     default:
       esp32_board   = ESP32_S2_T8_V1_1;
-#elif defined(CONFIG_IDF_TARGET_ESP32S3)
+#elif defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
     case MakeFlashId(GIGADEVICE_ID, GIGADEVICE_GD25Q128):
       /* specific to psram_type=opi enabled custom build */
       hw_info.model = SOFTRF_MODEL_HAM;
@@ -782,7 +803,7 @@ static void ESP32_setup()
 #endif /* ESP_IDF_VERSION_MAJOR */
 #elif defined(CONFIG_IDF_TARGET_ESP32S2)
     esp32_board      = ESP32_S2_T8_V1_1;
-#elif defined(CONFIG_IDF_TARGET_ESP32S3)
+#elif defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
     switch (flash_id)
     {
     case MakeFlashId(GIGADEVICE_ID, GIGADEVICE_GD25Q128):
@@ -1074,7 +1095,7 @@ static void ESP32_setup()
 
 #endif /* CONFIG_IDF_TARGET_ESP32S2 */
 
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
   } else if (hw_info.model == SOFTRF_MODEL_PRIME_MK3 ||
              esp32_board   == ESP32_S3_DEVKIT) {
     Wire1.begin(SOC_GPIO_PIN_S3_PMU_SDA , SOC_GPIO_PIN_S3_PMU_SCL);
@@ -1175,23 +1196,80 @@ static void ESP32_setup()
       delay(200);
 
 #if !defined(EXCLUDE_MAG)
-      bool esp32_has_qmc_u = false;
-      bool esp32_has_qmc_n = false;
-      esp32_has_qmc_u = mag_qmc6310.begin(Wire, QMC6310U_SLAVE_ADDRESS,
-                                          SOC_GPIO_PIN_S3_SDA,
-                                          SOC_GPIO_PIN_S3_SCL);
-      if (esp32_has_qmc_u) {
-        hw_info.mag = MAG_QMC6310U;
-      } else {
-        esp32_has_qmc_n = mag_qmc6310.begin(Wire, QMC6310N_SLAVE_ADDRESS,
+      bool esp32_has_qmc10_u = false;
+      bool esp32_has_qmc10_n = false;
+#if SENSORLIB_VERSION >= SENSORLIB_VERSION_VAL(0, 4, 1)
+      bool esp32_has_qmc9    = false;
+#endif /* (0, 4, 1) */
+
+      esp32_has_qmc10_u = mag_qmc6310.begin(Wire, QMC6310U_SLAVE_ADDRESS,
                                             SOC_GPIO_PIN_S3_SDA,
                                             SOC_GPIO_PIN_S3_SCL);
-        if (esp32_has_qmc_n) {
+      if (esp32_has_qmc10_u) {
+        hw_info.mag = MAG_QMC6310U;
+      } else {
+        esp32_has_qmc10_n = mag_qmc6310.begin(Wire, QMC6310N_SLAVE_ADDRESS,
+                                              SOC_GPIO_PIN_S3_SDA,
+                                              SOC_GPIO_PIN_S3_SCL);
+        if (esp32_has_qmc10_n) {
           hw_info.mag = MAG_QMC6310N;
+#if SENSORLIB_VERSION >= SENSORLIB_VERSION_VAL(0, 4, 1)
+        } else {
+          esp32_has_qmc9 = mag_qmc6309.begin(Wire, QMC6309_SLAVE_ADDRESS,
+                                             SOC_GPIO_PIN_S3_SDA,
+                                             SOC_GPIO_PIN_S3_SCL);
+          if (esp32_has_qmc9) {
+            hw_info.mag = MAG_QMC6309;
+          }
+#endif /* (0, 4, 1) */
         }
       }
 
-      if (esp32_has_qmc_u || esp32_has_qmc_n) {
+      if (esp32_has_qmc10_u || esp32_has_qmc10_n) {
+#if SENSORLIB_VERSION >= SENSORLIB_VERSION_VAL(0, 4, 1)
+        mag_qmc6310.configMagnetometer(
+            /*
+            * Run Mode
+            * MODE_SUSPEND
+            * MODE_NORMAL
+            * MODE_SINGLE
+            * MODE_CONTINUOUS
+            * * */
+            OperationMode::NORMAL,
+            /*
+            * Full Range
+            * RANGE_30G
+            * RANGE_12G
+            * RANGE_8G
+            * RANGE_2G
+            * * */
+            MagFullScaleRange::FS_2G,
+            /*
+            * Output data rate
+            * DATARATE_10HZ
+            * DATARATE_50HZ
+            * DATARATE_100HZ
+            * DATARATE_200HZ
+            * * */
+            100.0f,
+            /*
+            * Over sample Ratio1
+            * OSR_8
+            * OSR_4
+            * OSR_2
+            * OSR_1
+            * * * */
+            MagOverSampleRatio::OSR_1,
+
+            /*
+            * Down sample Ratio1
+            * DSR_8
+            * DSR_4
+            * DSR_2
+            * DSR_1
+            * * */
+            MagDownSampleRatio::DSR_1);
+#else
         mag_qmc6310.configMagnetometer(
             /*
             * Run Mode
@@ -1234,6 +1312,52 @@ static void ESP32_setup()
             * DSR_1
             * * */
             SensorQMC6310::DSR_1);
+#endif /* (0, 4, 1) */
+#if SENSORLIB_VERSION >= SENSORLIB_VERSION_VAL(0, 4, 1)
+      } else if (esp32_has_qmc9) {
+        mag_qmc6309.configMagnetometer(
+            /*
+            * Run Mode
+            * MODE_SUSPEND
+            * MODE_NORMAL
+            * MODE_SINGLE
+            * MODE_CONTINUOUS
+            * * */
+            OperationMode::NORMAL,
+            /*
+            * Full Range
+            * RANGE_30G
+            * RANGE_12G
+            * RANGE_8G
+            * RANGE_2G
+            * * */
+            MagFullScaleRange::FS_2G,
+            /*
+            * Output data rate
+            * DATARATE_10HZ
+            * DATARATE_50HZ
+            * DATARATE_100HZ
+            * DATARATE_200HZ
+            * * */
+            100.0f,
+            /*
+            * Over sample Ratio1
+            * OSR_8
+            * OSR_4
+            * OSR_2
+            * OSR_1
+            * * * */
+            MagOverSampleRatio::OSR_1,
+
+            /*
+            * Down sample Ratio1
+            * DSR_8
+            * DSR_4
+            * DSR_2
+            * DSR_1
+            * * */
+            MagDownSampleRatio::DSR_1);
+#endif /* (0, 4, 1) */
       } else {
         WIRE_FINI(Wire);
       }
@@ -1733,7 +1857,7 @@ static void ESP32_setup()
         WIRE_FINI(Wire1);
       }
     }
-#endif /* CONFIG_IDF_TARGET_ESP32S3 */
+#endif /* CONFIG_IDF_TARGET_ESP32S3-S31 */
 
 #if defined(CONFIG_IDF_TARGET_ESP32C2)
   } else if (esp32_board == ESP32_C2_DEVKIT) {
@@ -2034,7 +2158,9 @@ static void ESP32_setup()
 #endif /* CONFIG_IDF_TARGET_ESP32P4 */
   }
 
-#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32P4)
+#if defined(CONFIG_IDF_TARGET_ESP32S3)  || \
+    defined(CONFIG_IDF_TARGET_ESP32S31) || \
+    defined(CONFIG_IDF_TARGET_ESP32P4)
   ESP32_has_spiflash = SPIFlash->begin(possible_devices,
                                        EXTERNAL_FLASH_DEVICE_COUNT);
   if (ESP32_has_spiflash) {
@@ -2104,8 +2230,9 @@ static void ESP32_setup()
 #endif /* CONFIG_IDF_TARGET_ESP32S3-P4 */
 
 #if ARDUINO_USB_CDC_ON_BOOT && \
-    (defined(CONFIG_IDF_TARGET_ESP32S2) || \
-     defined(CONFIG_IDF_TARGET_ESP32S3) || \
+    (defined(CONFIG_IDF_TARGET_ESP32S2)  || \
+     defined(CONFIG_IDF_TARGET_ESP32S3)  || \
+     defined(CONFIG_IDF_TARGET_ESP32S31) || \
      defined(CONFIG_IDF_TARGET_ESP32P4))
 #if CONFIG_TINYUSB_ENABLED
   if (USB.manufacturerName(ESP32SX_Device_Manufacturer)) {
@@ -2176,7 +2303,7 @@ static void ESP32_setup()
   Serial.begin(SERIAL_OUT_BR, SERIAL_OUT_BITS);
 #endif /* ARDUINO_USB_CDC_ON_BOOT */
 
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
   ui = &ui_settings;
 
   if (esp32_board == ESP32_TTGO_T_BEAM_SUPREME)
@@ -2310,18 +2437,56 @@ static void ESP32_setup()
 
     hw_info.revision = ESP32_has_32k_xtal ? 5 : 3;
 
-    if (hw_info.revision > 3) {
-      digitalWrite(SOC_GPIO_PIN_HELTRK_VEXT_EN, HIGH);
-    } else {
-      digitalWrite(SOC_GPIO_PIN_HELTRK_GNSS_EN, LOW);
-      digitalWrite(SOC_GPIO_PIN_HELTRK_TFT_EN,  LOW);
-      digitalWrite(SOC_GPIO_PIN_HELTRK_VEXT_EN, LOW);
+    bool ESP32_has_SubGHzFE = false;
 
-      pinMode(SOC_GPIO_PIN_HELTRK_GNSS_EN, INPUT_PULLDOWN);
-      delay(300);
-      pinMode(SOC_GPIO_PIN_HELTRK_GNSS_EN, OUTPUT);
-      pinMode(SOC_GPIO_PIN_HELTRK_TFT_EN,  OUTPUT);
+    if (ESP32_has_32k_xtal) {
+      pinMode(SOC_GPIO_PIN_HELTRK_VFEM_EN, INPUT_PULLDOWN);
+      pinMode(SOC_GPIO_PIN_HELTRK_PA_CSD,  INPUT_PULLUP);
+      pinMode(SOC_GPIO_PIN_HELTRK_PA_CTX,  INPUT_PULLUP);
+
+      delay(1);
+
+      if (digitalRead(SOC_GPIO_PIN_HELTRK_PA_CSD) == LOW &&
+          digitalRead(SOC_GPIO_PIN_HELTRK_PA_CTX) == LOW) {
+        ESP32_has_SubGHzFE = true;
+        hw_info.revision = 23; /* V2.3 PCB marking */
+      }
+
+      pinMode(SOC_GPIO_PIN_HELTRK_PA_CSD,  INPUT);
+      pinMode(SOC_GPIO_PIN_HELTRK_PA_CTX,  INPUT);
+      pinMode(SOC_GPIO_PIN_HELTRK_VFEM_EN, INPUT);
     }
+
+    switch (hw_info.revision) {
+      case 3:
+        digitalWrite(SOC_GPIO_PIN_HELTRK_GNSS_EN, LOW);
+        digitalWrite(SOC_GPIO_PIN_HELTRK_TFT_EN,  LOW);
+        digitalWrite(SOC_GPIO_PIN_HELTRK_VEXT_EN, LOW);
+
+        pinMode(SOC_GPIO_PIN_HELTRK_GNSS_EN, INPUT_PULLDOWN);
+        delay(300);
+        pinMode(SOC_GPIO_PIN_HELTRK_GNSS_EN, OUTPUT);
+        pinMode(SOC_GPIO_PIN_HELTRK_TFT_EN,  OUTPUT);
+        break;
+
+      case 23:
+        digitalWrite(SOC_GPIO_PIN_HELTRK_VEXT_EN, HIGH);
+
+        pinMode(SOC_GPIO_PIN_HELTRK_VFEM_EN, INPUT_PULLUP);
+        delay(1);
+        pinMode(SOC_GPIO_PIN_HELTRK_PA_CSD,  OUTPUT);
+        digitalWrite(SOC_GPIO_PIN_HELTRK_PA_CSD, HIGH);
+
+        pinMode(SOC_GPIO_PIN_HELTRK_PA_CTX,  OUTPUT);
+        digitalWrite(SOC_GPIO_PIN_HELTRK_PA_CTX, HIGH); // Receive Bypass Mode
+        break;
+
+      case 5:
+      default:
+        digitalWrite(SOC_GPIO_PIN_HELTRK_VEXT_EN, HIGH);
+        break;
+    }
+
     pinMode(SOC_GPIO_PIN_HELTRK_VEXT_EN,   OUTPUT);
 
     if (rtc_get_reset_reason(0) == POWERON_RESET) {
@@ -2473,7 +2638,7 @@ static void ESP32_setup()
     hw_info.mag = (hw_info.imu == IMU_MPU9250) ? MAG_AK8963 : hw_info.mag;
 #endif /* EXCLUDE_IMU */
   }
-#endif /* CONFIG_IDF_TARGET_ESP32S3 */
+#endif /* CONFIG_IDF_TARGET_ESP32S3-S31 */
 
 #if defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32)
   if (esp32_board == ESP32_RADIOMASTER_XR1 ||
@@ -2615,7 +2780,15 @@ static void ESP32_setup()
     }
     TDP4_IIC_2.beginTransmission(AW86224_ADDRESS);
     if (TDP4_IIC_2.endTransmission() == 0) {
-      hw_info.haptic   = HAPTIC_AW86224;
+#if SENSORLIB_VERSION >= SENSORLIB_VERSION_VAL(0, 4, 1)
+      ESP32_has_vibra = vibra.begin(TDP4_IIC_2, AW8624_SLAVE_ADDRESS,
+                                    SOC_GPIO_PIN_TDP4_SDA_2,
+                                    SOC_GPIO_PIN_TDP4_SCL_2);
+      if (ESP32_has_vibra)
+#endif /* (0, 4, 1) */
+      {
+        hw_info.haptic = HAPTIC_AW86224;
+      }
     }
 
     hw_info.camera = CAMERA_OV2710;
@@ -2650,7 +2823,9 @@ static void ESP32_setup()
 
 static void ESP32_post_init()
 {
-#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32P4)
+#if defined(CONFIG_IDF_TARGET_ESP32S3)  || \
+    defined(CONFIG_IDF_TARGET_ESP32S31) || \
+    defined(CONFIG_IDF_TARGET_ESP32P4)
   if (hw_info.model == SOFTRF_MODEL_PRIME_MK3 ||
       hw_info.model == SOFTRF_MODEL_CONCORDE)
   {
@@ -2758,7 +2933,7 @@ static void ESP32_post_init()
   }
 #endif /* CONFIG_IDF_TARGET_ESP32S3-P4 */
 
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
 #if !defined(EXCLUDE_VOICE_MESSAGE)
   if (esp32_board == ESP32_LILYGO_T_TWR2 && hw_info.revision == 1 && uSD_is_attached)
   {
@@ -2846,7 +3021,9 @@ static void ESP32_post_init()
   case DISPLAY_OLED_1_3:
     OLED_info1();
 
-#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32P4)
+#if defined(CONFIG_IDF_TARGET_ESP32S3)  || \
+    defined(CONFIG_IDF_TARGET_ESP32S31) || \
+    defined(CONFIG_IDF_TARGET_ESP32P4)
     if (esp32_board == ESP32_TTGO_T_BEAM_SUPREME ||
         esp32_board == ESP32_P4_WT_DEVKIT)
     {
@@ -3146,7 +3323,7 @@ static void ESP32_loop()
     break;
   }
 
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
   if (!RTC_sync) {
     if (rtc &&
         gnss.date.isValid()                         &&
@@ -3229,11 +3406,21 @@ static void ESP32_loop()
     case MAG_QMC6310U:
     case MAG_QMC6310N:
       if (mag_qmc6310.isDataReady()) {
+#if SENSORLIB_VERSION >= SENSORLIB_VERSION_VAL(0, 4, 1)
+        MagnetometerData data;
+
+        mag_qmc6310.readData(data);
+        // Gauss to ?T
+        float m_x = MagnetometerUtils::gaussToMicroTesla(data.magnetic_field.x);
+        float m_y = MagnetometerUtils::gaussToMicroTesla(data.magnetic_field.y);
+        float m_z = MagnetometerUtils::gaussToMicroTesla(data.magnetic_field.z);
+#else
         mag_qmc6310.readData();
 
         float m_x = mag_qmc6310.getX();
         float m_y = mag_qmc6310.getY();
         float m_z = mag_qmc6310.getZ();
+#endif /* (0, 4, 1) */
         float angle = atan2(-m_z, m_x);
         if (angle < 0) {
           angle += 2 * PI;
@@ -3255,6 +3442,29 @@ static void ESP32_loop()
     #endif
       }
       break;
+
+#if SENSORLIB_VERSION >= SENSORLIB_VERSION_VAL(0, 4, 1)
+    case MAG_QMC6309:
+      if (mag_qmc6309.isDataReady()) {
+        MagnetometerData data;
+
+        mag_qmc6309.readData(data);
+        // Gauss to ?T
+        float m_x = MagnetometerUtils::gaussToMicroTesla(data.magnetic_field.x);
+        float m_y = MagnetometerUtils::gaussToMicroTesla(data.magnetic_field.y);
+        float m_z = MagnetometerUtils::gaussToMicroTesla(data.magnetic_field.z);
+
+        float angle = atan2(-m_z, m_x);
+        if (angle < 0) {
+          angle += 2 * PI;
+        }
+    #if defined(USE_OLED)
+        MAG_heading = (int) (angle * 180 / M_PI);
+    #endif /* USE_OLED */
+      }
+      break;
+#endif /* (0, 4, 1) */
+
     case MAG_NONE:
     default:
       break;
@@ -3309,7 +3519,7 @@ static void ESP32_loop()
 //    digitalWrite(SOC_GPIO_PIN_HELTRK_LED,
 //                 digitalRead(SOC_GPIO_PIN_HELTRK_GNSS_PPS));
 //  }
-#endif /* CONFIG_IDF_TARGET_ESP32S3 */
+#endif /* CONFIG_IDF_TARGET_ESP32S3-S31 */
 
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
   if (esp32_board == ESP32_P4_WT_DEVKIT ||
@@ -3330,7 +3540,9 @@ static void ESP32_fini(int reason)
 #endif /* USE_ADAFRUIT_NEO_LIBRARY */
 #endif /* EXCLUDE_LED_RING */
 
-#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32P4)
+#if defined(CONFIG_IDF_TARGET_ESP32S3)  || \
+    defined(CONFIG_IDF_TARGET_ESP32S31) || \
+    defined(CONFIG_IDF_TARGET_ESP32P4)
   if (ESP32_has_spiflash &&
      (hw_info.storage == STORAGE_FLASH ||
       hw_info.storage == STORAGE_FLASH_AND_CARD)) {
@@ -3509,7 +3721,7 @@ static void ESP32_fini(int reason)
 
   } else if (esp32_board == ESP32_LILYGO_T_TWR2) {
 
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
 #if defined(USE_NEOPIXELBUS_LIBRARY)
     TWR2_Pixel.SetPixelColor(0, LED_COLOR_BLACK);
     TWR2_Pixel.Show();
@@ -3518,7 +3730,7 @@ static void ESP32_fini(int reason)
     TWR2_Pixel.setPixelColor(0, LED_COLOR_BLACK);
     TWR2_Pixel.show();
 #endif /* USE_ADAFRUIT_NEO_LIBRARY */
-#endif /* CONFIG_IDF_TARGET_ESP32S3 */
+#endif /* CONFIG_IDF_TARGET_ESP32S3-S31 */
 
     switch (hw_info.pmu)
     {
@@ -3555,6 +3767,11 @@ static void ESP32_fini(int reason)
       pinMode(SOC_GPIO_PIN_HELTRK_GNSS_EN, INPUT);
       pinMode(SOC_GPIO_PIN_HELTRK_TFT_EN,  INPUT);
     }
+    if (hw_info.revision > 5) {
+      pinMode(SOC_GPIO_PIN_HELTRK_VFEM_EN, INPUT);
+      pinMode(SOC_GPIO_PIN_HELTRK_PA_CSD,  INPUT);
+      pinMode(SOC_GPIO_PIN_HELTRK_PA_CTX,  INPUT);
+    }
 
     pinMode(SOC_GPIO_PIN_HELTRK_GNSS_RST,  INPUT);
     pinMode(SOC_GPIO_PIN_HELTRK_ADC_EN,    INPUT);
@@ -3569,12 +3786,12 @@ static void ESP32_fini(int reason)
              esp32_board == ESP32_LILYGO_T3S3_OLED) {
     WIRE_FINI(Wire);
 
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
     pinMode(SOC_GPIO_PIN_T3S3_3V3EN,       OUTPUT);
     digitalWrite(SOC_GPIO_PIN_T3S3_3V3EN,  LOW);
     gpio_hold_en(GPIO_NUM_35);
     gpio_deep_sleep_hold_en();
-#endif /* CONFIG_IDF_TARGET_ESP32S3 */
+#endif /* CONFIG_IDF_TARGET_ESP32S3-S31 */
 
 #if !defined(CONFIG_IDF_TARGET_ESP32C2) && !defined(CONFIG_IDF_TARGET_ESP32C3)
     esp_sleep_enable_ext1_wakeup(1ULL << SOC_GPIO_PIN_S3_BUTTON,
@@ -3614,7 +3831,7 @@ static void ESP32_fini(int reason)
     gpio_hold_en((gpio_num_t) SOC_GPIO_PIN_M5_GNSS_WKE);
     pinMode(SOC_GPIO_PIN_M5_GNSS_RST,             INPUT);
 
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
     if (ESP32_has_gpio_extension) {
       pca9557->pinMode(SOC_EXPIO_PIN_M5_IO_EN,    INPUT);
       pca9557->pinMode(SOC_EXPIO_PIN_M5_EPD_EN,   INPUT);
@@ -3623,7 +3840,7 @@ static void ESP32_fini(int reason)
       pca9557->pinMode(SOC_EXPIO_LED_M5_RED,      INPUT);
       pca9557->pinMode(SOC_EXPIO_LED_M5_BLUE,     INPUT);
     }
-#endif /* CONFIG_IDF_TARGET_ESP32S3 */
+#endif /* CONFIG_IDF_TARGET_ESP32S3-S31 */
 
     WIRE_FINI(Wire1);
 
@@ -3718,14 +3935,14 @@ static void ESP32_fini(int reason)
 
 static void ESP32_reset()
 {
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
   if (esp32_board == ESP32_ELECROW_TN_M2 ||
       esp32_board == ESP32_ELECROW_TN_M5) {
     // pinMode(SOC_GPIO_PIN_BUZZER,       OUTPUT);
     // digitalWrite(SOC_GPIO_PIN_BUZZER,  LOW);
     gpio_hold_en((gpio_num_t) SOC_GPIO_PIN_BUZZER);
   }
-#endif /* CONFIG_IDF_TARGET_ESP32S3 */
+#endif /* CONFIG_IDF_TARGET_ESP32S3-S31 */
 
   ESP.restart();
 }
@@ -3993,6 +4210,12 @@ static void ESP32_Sound_test(int var)
 #endif /* USE_BLE_MIDI */
 
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
+  if (esp32_board == ESP32_LILYGO_TDISPLAY_P4 && ESP32_has_vibra == true) {
+#if SENSORLIB_VERSION >= SENSORLIB_VERSION_VAL(0, 4, 1)
+    vibra.playEffect(1);
+#endif /* (0, 4, 1) */
+  }
+
 #if !defined(EXCLUDE_VOICE_MESSAGE)
   if ((esp32_board == ESP32_LILYGO_TDISPLAY_P4 ||
        esp32_board == ESP32_P4_WT_DEVKIT) &&
@@ -4026,12 +4249,12 @@ static void ESP32_Sound_tone(int hz, uint8_t volume)
       ledcWriteTone(LEDC_CHANNEL_BUZZER, hz);
       ledcWrite(LEDC_CHANNEL_BUZZER, volume == BUZZER_VOLUME_FULL ? 0xFF : 0x07);
     } else {
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
       if (esp32_board == ESP32_ELECROW_TN_M2 ||
           esp32_board == ESP32_ELECROW_TN_M5) {
         gpio_hold_dis((gpio_num_t) SOC_GPIO_PIN_BUZZER);
       }
-#endif /* CONFIG_IDF_TARGET_ESP32S3 */
+#endif /* CONFIG_IDF_TARGET_ESP32S3-S31 */
 
       ledcWriteTone(LEDC_CHANNEL_BUZZER, 0); // off
 
@@ -4239,7 +4462,9 @@ static int ESP32_WiFi_clients_count()
 #endif /* EXCLUDE_WIFI */
 }
 
-#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32P4)
+#if defined(CONFIG_IDF_TARGET_ESP32S3)  || \
+    defined(CONFIG_IDF_TARGET_ESP32S31) || \
+    defined(CONFIG_IDF_TARGET_ESP32P4)
 EEPROMClass  SkyView_EEPROM("SkyView");
 
 typedef struct SV_EEPROM_S {
@@ -4263,7 +4488,9 @@ static bool ESP32_EEPROM_begin(size_t size)
 #if !defined(EXCLUDE_EEPROM)
   rval = EEPROM.begin(size);
 
-#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32P4)
+#if defined(CONFIG_IDF_TARGET_ESP32S3)  || \
+    defined(CONFIG_IDF_TARGET_ESP32S31) || \
+    defined(CONFIG_IDF_TARGET_ESP32P4)
   if (esp32_board == ESP32_ELECROW_TN_M5 ||
       esp32_board == ESP32_LILYGO_TDISPLAY_P4) {
     bool sv = SkyView_EEPROM.begin(sizeof(sv_eeprom_t));
@@ -4319,7 +4546,11 @@ static void ESP32_EEPROM_extension(int cmd)
         ui->adb          = DB_OGN;
         ui->idpref       = ID_TYPE;
         ui->vmode        = VIEW_MODE_STATUS;
-        ui->voice        = VOICE_OFF;
+        if (esp32_board == ESP32_LILYGO_TDISPLAY_P4) {
+          ui->voice      = VOICE_1;
+        } else {
+          ui->voice      = VOICE_OFF;
+        }
         ui->aghost       = ANTI_GHOSTING_OFF;
         ui->filter       = TRAFFIC_FILTER_OFF;
         ui->power_save   = 0;
@@ -4329,9 +4560,11 @@ static void ESP32_EEPROM_extension(int cmd)
   }
 #endif /* CONFIG_IDF_TARGET_ESP32S3-P4 */
 
-#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32P4)
+#if defined(CONFIG_IDF_TARGET_ESP32S3)  || \
+    defined(CONFIG_IDF_TARGET_ESP32S31) || \
+    defined(CONFIG_IDF_TARGET_ESP32P4)
   if (cmd == EEPROM_EXT_LOAD || cmd == EEPROM_EXT_DEFAULTS) {
-    if ( ESP32_has_spiflash && FATFS_is_mounted ) {
+    if (FATFS_is_mounted) {
       File32 file = fatfs.open(SETTINGS_JSON_PATH, FILE_READ);
 
       if (file) {
@@ -4489,14 +4722,14 @@ static void ESP32_EEPROM_extension(int cmd)
       settings->d1090 = D1090_UART;
     }
 #endif /* CONFIG_IDF_TARGET_ESP32 */
-#if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3) || \
-    defined(CONFIG_IDF_TARGET_ESP32C2) || defined(CONFIG_IDF_TARGET_ESP32C3) || \
-    defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6) || \
-    defined(CONFIG_IDF_TARGET_ESP32C61)
+#if defined(CONFIG_IDF_TARGET_ESP32S2)  || defined(CONFIG_IDF_TARGET_ESP32S3) || \
+    defined(CONFIG_IDF_TARGET_ESP32S31) || defined(CONFIG_IDF_TARGET_ESP32C2) || \
+    defined(CONFIG_IDF_TARGET_ESP32C3)  || defined(CONFIG_IDF_TARGET_ESP32C5) || \
+    defined(CONFIG_IDF_TARGET_ESP32C6)  || defined(CONFIG_IDF_TARGET_ESP32C61)
     if (settings->bluetooth != BLUETOOTH_NONE) {
-#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32C3) || \
-    defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6) || \
-    defined(CONFIG_IDF_TARGET_ESP32C61)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31) || \
+    defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C5)  || \
+    defined(CONFIG_IDF_TARGET_ESP32C6) || defined(CONFIG_IDF_TARGET_ESP32C61)
       settings->bluetooth = BLUETOOTH_LE_HM10_SERIAL;
 #else
       settings->bluetooth = BLUETOOTH_NONE;
@@ -4537,7 +4770,7 @@ static void ESP32_SPI_begin()
                 SOC_GPIO_PIN_T8_S2_MOSI, SOC_GPIO_PIN_T8_S2_SS);
       break;
 #endif /* CONFIG_IDF_TARGET_ESP32S2 */
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
     case ESP32_S3_DEVKIT:
     case ESP32_TTGO_T_BEAM_SUPREME:
     case ESP32_ELECROW_TN_M2:
@@ -4569,7 +4802,7 @@ static void ESP32_SPI_begin()
       SPI.begin(SOC_GPIO_PIN_M5_SCK,  SOC_GPIO_PIN_M5_MISO,
                 SOC_GPIO_PIN_M5_MOSI, SOC_GPIO_PIN_M5_SS);
       break;
-#endif /* CONFIG_IDF_TARGET_ESP32S3 */
+#endif /* CONFIG_IDF_TARGET_ESP32S3-S31 */
 #if defined(CONFIG_IDF_TARGET_ESP32C2)
     case ESP32_C2_DEVKIT:
       SPI.begin(SOC_GPIO_PIN_C2_SCK,  SOC_GPIO_PIN_C2_MISO,
@@ -4675,7 +4908,7 @@ static void ESP32_swSer_begin(unsigned long baud)
                            SOC_GPIO_PIN_T8_S2_GNSS_RX,
                            SOC_GPIO_PIN_T8_S2_GNSS_TX);
 #endif /* CONFIG_IDF_TARGET_ESP32S2 */
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
     } else if (hw_info.model == SOFTRF_MODEL_PRIME_MK3) {
       Serial.println(F("INFO: TTGO T-Beam Supreme is detected."));
       Serial_GNSS_In.begin(baud, SERIAL_IN_BITS,
@@ -4730,7 +4963,7 @@ static void ESP32_swSer_begin(unsigned long baud)
       Serial.println(F("INFO: Ebyte EoRa_HUB_900TB is detected."));
       Serial_GNSS_In.begin(baud, SERIAL_IN_BITS,
                            SOC_GPIO_PIN_EHUB_GNSS_RX, SOC_GPIO_PIN_EHUB_GNSS_TX);
-#endif /* CONFIG_IDF_TARGET_ESP32S3 */
+#endif /* CONFIG_IDF_TARGET_ESP32S3-S31 */
 #if defined(CONFIG_IDF_TARGET_ESP32C2)
     } else if (esp32_board == ESP32_C2_DEVKIT) {
       Serial.println(F("INFO: ESP32-C2 DevKit is detected."));
@@ -5181,7 +5414,7 @@ static byte ESP32_Display_setup()
 
     /* SSD1306 or SH1106 I2C OLED probing */
     if (false) {
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
     } else if (esp32_board == ESP32_S3_DEVKIT) {
       Wire.begin(SOC_GPIO_PIN_S3_SDA, SOC_GPIO_PIN_S3_SCL);
       Wire.beginTransmission(SSD1306_OLED_I2C_ADDR);
@@ -5255,7 +5488,7 @@ static byte ESP32_Display_setup()
         u8x8 = new U8X8_SSD1306_128X64_NONAME_2ND_HW_I2C(SOC_GPIO_PIN_EHUB_OLED_RST); // &u8x8_ebyte;
         rval = DISPLAY_OLED_TTGO;
       }
-#endif /* CONFIG_IDF_TARGET_ESP32S3 */
+#endif /* CONFIG_IDF_TARGET_ESP32S3-S31 */
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
     } else if (esp32_board == ESP32_P4_WT_DEVKIT) {
       Wire.begin(SOC_GPIO_PIN_P4_SDA, SOC_GPIO_PIN_P4_SCL);
@@ -5499,7 +5732,7 @@ static byte ESP32_Display_setup()
 #if defined(USE_TFT)
     tft = new TFT_eSPI(LV_HOR_RES, LV_VER_RES);
     tft->init();
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
     uint8_t r = (ROTATE_90 + ui->rotate) & 0x3; /* 90 deg. is default angle */
 #else
 #if LV_HOR_RES != 135 && LV_HOR_RES != 80
@@ -5507,7 +5740,7 @@ static byte ESP32_Display_setup()
 #else
     uint8_t r = 1; /* 90 degrees */
 #endif /* LV_HOR_RES */
-#endif /* CONFIG_IDF_TARGET_ESP32S3 */
+#endif /* CONFIG_IDF_TARGET_ESP32S3-S31 */
     tft->setRotation(r);
     tft->fillScreen(TFT_NAVY);
 
@@ -5515,7 +5748,7 @@ static byte ESP32_Display_setup()
                  SOC_GPIO_PIN_T8_S2_TFT_BL :
                  (esp32_board == ESP32_HELTEC_TRACKER && hw_info.revision == 3) ?
                  SOC_GPIO_PIN_HELTRK_TFT_BL_V03 :
-                 (esp32_board == ESP32_HELTEC_TRACKER && hw_info.revision == 5) ?
+                 (esp32_board == ESP32_HELTEC_TRACKER && hw_info.revision >= 5) ?
                  SOC_GPIO_PIN_HELTRK_TFT_BL_V05 :
                  SOC_GPIO_PIN_TWATCH_TFT_BL;
 
@@ -5998,7 +6231,7 @@ static void ESP32_Display_fini(int reason)
                      SOC_GPIO_PIN_T8_S2_TFT_BL :
                      (esp32_board == ESP32_HELTEC_TRACKER && hw_info.revision == 3) ?
                      SOC_GPIO_PIN_HELTRK_TFT_BL_V03 :
-                     (esp32_board == ESP32_HELTEC_TRACKER && hw_info.revision == 5) ?
+                     (esp32_board == ESP32_HELTEC_TRACKER && hw_info.revision >= 5) ?
                      SOC_GPIO_PIN_HELTRK_TFT_BL_V05 :
                      SOC_GPIO_PIN_TWATCH_TFT_BL;
 
@@ -6102,7 +6335,7 @@ static void ESP32_Battery_setup()
 #else
     /* TBD */
 #endif /* ESP_IDF_VERSION_MAJOR */
-#elif defined(CONFIG_IDF_TARGET_ESP32S3)
+#elif defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
 #if !defined(ESP_IDF_VERSION_MAJOR) || ESP_IDF_VERSION_MAJOR < 5
     /* use this procedure on T-TWR Plus (has PMU) to calibrate audio ADC */
     if (esp32_board == ESP32_LILYGO_T_TWR2 && hw_info.revision == 0) {
@@ -6263,12 +6496,12 @@ static float ESP32_Battery_param(uint8_t param)
 
     case PMU_NONE:
     default:
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
       if (esp32_board == ESP32_ELECROW_TN_M2) {
         voltage = (float) adc2_read_voltage();
         voltage *= 1.5;
       } else
-#endif /* CONFIG_IDF_TARGET_ESP32S3 */
+#endif /* CONFIG_IDF_TARGET_ESP32S3-S31 */
       {
         voltage = (float) read_voltage();
 
@@ -6330,7 +6563,7 @@ static bool ESP32_Baro_setup()
     Wire.setPins(SOC_GPIO_PIN_T8_S2_SDA, SOC_GPIO_PIN_T8_S2_SCL);
 
 #endif /* CONFIG_IDF_TARGET_ESP32S2 */
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S31)
   } else if (esp32_board == ESP32_S3_DEVKIT ||
              esp32_board == ESP32_TTGO_T_BEAM_SUPREME) {
 
@@ -6342,7 +6575,11 @@ static bool ESP32_Baro_setup()
 
   } else if (esp32_board == ESP32_HELTEC_TRACKER) {
 
-    Wire.setPins(SOC_GPIO_PIN_HELTRK_SDA, SOC_GPIO_PIN_HELTRK_SCL);
+    if (hw_info.revision == 23) {
+      Wire.setPins(SOC_GPIO_PIN_HELTRK_V2_SDA, SOC_GPIO_PIN_HELTRK_V2_SCL);
+    } else {
+      Wire.setPins(SOC_GPIO_PIN_HELTRK_SDA, SOC_GPIO_PIN_HELTRK_SCL);
+    }
 
   } else if (esp32_board == ESP32_LILYGO_T3S3_EPD ||
              esp32_board == ESP32_LILYGO_T3S3_OLED) {
@@ -6365,7 +6602,7 @@ static bool ESP32_Baro_setup()
 
     Wire.setPins(SOC_GPIO_PIN_EHUB_SDA, SOC_GPIO_PIN_EHUB_SCL);
 
-#endif /* CONFIG_IDF_TARGET_ESP32S3 */
+#endif /* CONFIG_IDF_TARGET_ESP32S3-S31 */
 #if defined(CONFIG_IDF_TARGET_ESP32C2)
   } else if (esp32_board == ESP32_C2_DEVKIT) {
 
@@ -6860,7 +7097,57 @@ static void ESP32_Button_fini()
   }
 }
 
-#if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3)
+static void ESP32_TTS(char *message)
+{
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+  char filename[MAX_FILENAME_LEN];
+
+  if (ui->voice != VOICE_OFF) {
+
+    if (!FATFS_is_mounted)
+      return;
+
+    if (hw_info.display == DISPLAY_TFT_WIRELESSTAG_7 ||
+        hw_info.display == DISPLAY_TFT_LILYGO_4_05   ||
+        hw_info.display == DISPLAY_AMOLED_LILYGO_4_1) {
+      // EPD_Message("VOICE", "ALERT");
+    }
+
+    bool wdt_status = loopTaskWDTEnabled;
+
+    if (wdt_status) {
+      disableLoopWDT();
+    }
+
+    char *word = strtok (message, " ");
+
+    while (word != NULL)
+    {
+        strcpy(filename, WAV_FILE_PREFIX);
+        strcat(filename,  ui->voice == VOICE_1 ? VOICE1_SUBDIR :
+                         (ui->voice == VOICE_2 ? VOICE2_SUBDIR :
+                         (ui->voice == VOICE_3 ? VOICE3_SUBDIR :
+                          "" )));
+        strcat(filename, word);
+        strcat(filename, WAV_FILE_SUFFIX);
+        play_file(filename);
+        word = strtok (NULL, " ");
+
+        yield();
+
+        /* Poll input source(s) */
+        // Input_loop();
+    }
+
+    if (wdt_status) {
+      enableLoopWDT();
+    }
+  }
+#endif /* CONFIG_IDF_TARGET_ESP32P4 */
+}
+
+#if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3) || \
+    defined(CONFIG_IDF_TARGET_ESP32S31)
 
 #define USB_TX_FIFO_SIZE (MAX_TRACKING_OBJECTS * 65 + 75 + 75 + 42 + 20)
 #define USB_RX_FIFO_SIZE (256)
@@ -7394,7 +7681,7 @@ IODev_ops_t ESP32CX_USBSerial_ops = {
 };
 #endif /* CONFIG_IDF_TARGET_ESP32C2 || C3 || C6 */
 
-#if defined(CONFIG_IDF_TARGET_ESP32P4) && defined(USE_USB_HOST)
+#if defined(CONFIG_IDF_TARGET_ESP32P4) && defined(USE_LIB_RTLSDR)
 
 #include "libusb.h"
 #include "rtl-sdr.h"
@@ -7408,8 +7695,8 @@ IODev_ops_t ESP32CX_USBSerial_ops = {
 #define MODE_S_PREAMBLE_US      8
 #define MODE_S_LONG_MSG_BITS    112
 #define MODE_S_SHORT_MSG_BITS   56
-#define MODE_S_ASYNC_BUF_NUMBER 3
-#define MODE_S_DATA_LEN         65536
+#define MODE_S_ASYNC_BUF_NUMBER 2
+#define MODE_S_DATA_LEN         32768
 #define MODE_S_FULL_LEN         (MODE_S_PREAMBLE_US + MODE_S_LONG_MSG_BITS)
 
 #define SDR_RINGBUFFER_SIZE     (1024 * 1024)
@@ -7452,6 +7739,11 @@ void on_msg(mode_s_t *self, struct mode_s_msg *mm) {
 
 //    printf("%02d %03d %02x%02x%02x\r\n", mm->msgtype, mm->msgbits, mm->aa1, mm->aa2, mm->aa3);
 
+      if (mm->msgtype == 17 &&
+          ((mm->metype >= 1 && mm->metype <= 4)  ||
+           (mm->metype >= 9 && mm->metype <= 18) ||
+           (mm->metype == 19)) ) {
+
         int acfts_in_sight = 0;
         struct mode_s_aircraft *a = state.aircrafts;
 
@@ -7460,9 +7752,10 @@ void on_msg(mode_s_t *self, struct mode_s_msg *mm) {
           a = a->next;
         }
 
-        if (acfts_in_sight < MAX_TRACKING_OBJECTS) {
+        if (acfts_in_sight < (4 * MAX_TRACKING_OBJECTS)) {
           interactiveReceiveData(self, mm);
         }
+      }
     }
 }
 
@@ -7642,12 +7935,17 @@ static void ESP32PX_USB_loop()
 
   if (millis() - ModeS_Time_Marker > MODES_TASK_INTERVAL) {
     struct mode_s_aircraft *a;
+    int acfts_in_sight = 0;
 
     for (a = state.aircrafts; a; a = a->next) {
+      acfts_in_sight++;
+
 #if 0
-      Serial.print("even_cprtime = ");  Serial.print(a->even_cprtime);
-      Serial.print(" ");
-      Serial.print("odd_cprtime = ");   Serial.println(a->odd_cprtime);
+      if (a->even_cprtime || a->odd_cprtime) {
+        Serial.print("even_cprtime = ");  Serial.print(a->even_cprtime);
+        Serial.print(" ");
+        Serial.print("odd_cprtime = ");   Serial.println(a->odd_cprtime);
+      }
 #endif
       if (a->even_cprtime && a->odd_cprtime &&
           abs((long) (a->even_cprtime - a->odd_cprtime)) <= MODE_S_INTERACTIVE_TTL * 1000 ) {
@@ -7664,6 +7962,10 @@ static void ESP32PX_USB_loop()
 #endif
       }
     }
+
+#if 0
+    Serial.printf("acfts_in_sight %d\r\n", acfts_in_sight);
+#endif
 
     interactiveRemoveStaleAircrafts(&state);
 
@@ -7714,9 +8016,11 @@ IODev_ops_t ESP32PX_USB_ops = {
   ESP32PX_USB_read,
   ESP32PX_USB_write
 };
-#endif /* CONFIG_IDF_TARGET_ESP32P4 && USE_USB_HOST */
+#endif /* CONFIG_IDF_TARGET_ESP32P4 */
 
-#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32P4)
+#if defined(CONFIG_IDF_TARGET_ESP32S3)  || \
+    defined(CONFIG_IDF_TARGET_ESP32S31) || \
+    defined(CONFIG_IDF_TARGET_ESP32P4)
 static bool ESP32_ADB_setup()
 {
   if (FATFS_is_mounted) {
@@ -7836,6 +8140,9 @@ const SoC_ops_t ESP32_ops = {
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
   SOC_ESP32S3,
   "ESP32-S3",
+#elif defined(CONFIG_IDF_TARGET_ESP32S31)
+  SOC_ESP32S31,
+  "ESP32-S31",
 #elif defined(CONFIG_IDF_TARGET_ESP32C2)
   SOC_ESP32C2,
   "ESP32-C2",
@@ -7896,9 +8203,9 @@ const SoC_ops_t ESP32_ops = {
 #else
   NULL,
 #endif /* EXCLUDE_BLUETOOTH */
-#if defined(CONFIG_IDF_TARGET_ESP32P4) && defined(USE_USB_HOST)
-  &ESP32PX_USB_ops,
-#elif (defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3)) && \
+#if (defined(CONFIG_IDF_TARGET_ESP32S2) || \
+     defined(CONFIG_IDF_TARGET_ESP32S3) || \
+     defined(CONFIG_IDF_TARGET_ESP32S31)) && \
    (ARDUINO_USB_CDC_ON_BOOT || defined(USE_USB_HOST))
   &ESP32SX_USBSerial_ops,
 #elif ARDUINO_USB_MODE && \
@@ -7907,12 +8214,13 @@ const SoC_ops_t ESP32_ops = {
        defined(CONFIG_IDF_TARGET_ESP32C6)  || \
        defined(CONFIG_IDF_TARGET_ESP32C61) || \
        defined(CONFIG_IDF_TARGET_ESP32H2)  || \
-       defined(CONFIG_IDF_TARGET_ESP32H4)  || \
-       defined(CONFIG_IDF_TARGET_ESP32P4))
+       defined(CONFIG_IDF_TARGET_ESP32H4))
   &ESP32CX_USBSerial_ops,
+#elif defined(CONFIG_IDF_TARGET_ESP32P4) && defined(USE_LIB_RTLSDR)
+  &ESP32PX_USB_ops,
 #else
   NULL,
-#endif /* USE_USB_HOST */
+#endif /* USB */
   NULL,
   ESP32_Display_setup,
   ESP32_Display_loop,
@@ -7929,7 +8237,10 @@ const SoC_ops_t ESP32_ops = {
   ESP32_Button_setup,
   ESP32_Button_loop,
   ESP32_Button_fini,
-#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32P4)
+  ESP32_TTS,
+#if defined(CONFIG_IDF_TARGET_ESP32S3)  || \
+    defined(CONFIG_IDF_TARGET_ESP32S31) || \
+    defined(CONFIG_IDF_TARGET_ESP32P4)
   &ESP32_ADB_ops
 #else
   NULL

@@ -38,7 +38,7 @@ enum
 #include "../platform/bluetooth/Bluedroid.h"
 #endif /* USE_NIMBLE */
 #endif /* EXCLUDE_BLUETOOTH */
-#elif defined(ARDUINO_ARCH_NRF52)
+#elif defined(ARDUINO_ARCH_NRF52) || defined(ARDUINO_ARCH_NRF54L15CLEAN)
 #include "../platform/bluetooth/Bluefruit.h"
 #elif defined(ARDUINO_ARCH_NRF52840)
 #include "../system/SoC.h"

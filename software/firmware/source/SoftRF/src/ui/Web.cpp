@@ -91,7 +91,7 @@ const char about_html[] PROGMEM = "<html>\
 <tr><th align=left>Robert Wessels and Tony Cave</th><td align=left>EasyLink library</td></tr>\
 <tr><th align=left>Oliver Jowett</th><td align=left>Dump978 library</td></tr>\
 <tr><th align=left>Phil Karn</th><td align=left>FEC library</td></tr>\
-<tr><th align=left>Lewis He</th><td align=left>AXP20X, XPowersLib and SensorsLib libraries</td></tr>\
+<tr><th align=left>Lewis He</th><td align=left>AXP20X, XPowersLib and SensorLib libraries</td></tr>\
 <tr><th align=left>Bodmer</th><td align=left>TFT library</td></tr>\
 <tr><th align=left>Michael Kuyper</th><td align=left>Basic MAC library</td></tr>\
 <tr><th align=left>Earle Philhower</th><td align=left>Arduino Core for RP2XXX and ESP8266Audio library</td></tr>\
@@ -364,7 +364,7 @@ char *Settings_content() {
       snprintf_P ( offset, size,
         PSTR("\
 <option %s value='%d'>%s</option>\
-<option %s value='%d'>%s</option>"),
+<!--<option %s value='%d'>%s</option>-->"), /* https://github.com/Lora-net/usp/issues/4 */
       (settings->rf_protocol == RF_PROTOCOL_ADSB_1090 ? "selected" : ""),
        RF_PROTOCOL_ADSB_1090, es1090_proto_desc.name,
       (settings->rf_protocol == RF_PROTOCOL_ADSB_UAT  ? "selected" : ""),

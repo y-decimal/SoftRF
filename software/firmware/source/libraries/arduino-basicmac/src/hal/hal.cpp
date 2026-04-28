@@ -572,7 +572,7 @@ u1_t hal_checkTimer (u4_t time) {
     defined(ARDUINO_ARCH_RP2040)  || defined(ARDUINO_ARCH_RP2350)  || \
     defined(ARDUINO_ARCH_RENESAS) || defined(ARDUINO_ARCH_SILABS)  || \
     defined(ARDUINO_ARCH_CH32)    || defined(LUCKFOX_LYRA)         || \
-    defined(CONFIG_IDF_TARGET_ESP32P4)
+    defined(CONFIG_IDF_TARGET_ESP32P4) || defined(ARDUINO_ARCH_NRF54L15CLEAN)
 
 // Fix for STM32 HAL based cores.
 

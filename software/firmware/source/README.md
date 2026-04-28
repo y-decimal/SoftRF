@@ -554,3 +554,22 @@ As a result of the build, one program binary will become created:
 - **SoftRF** - the program code designed to work with Luckfox Lyra's primary SPI bus;
 
 <br>
+
+## nRF54L15
+
+1. Follow [these instructions](https://github.com/lolren/NRF54L15-Clean-Arduino-core?tab=readme-ov-file#install)
+  to install Arduino IDE and [XIAO nRF54L15 Clean Arduino Core](https://github.com/lolren/NRF54L15-Clean-Arduino-core/releases) (0.6.52)
+2. open ``<My Documents>`` (Windows) , ``<Home>`` (Linux) or ``<Documents>`` (MacOS) directory
+3. create **Arduino** sub-directory
+4. transfer full content of **SoftRF** and **libraries** GitHub folders into the sub-directory:
+
+    [SoftRF](https://github.com/lyusupov/SoftRF/tree/master/software/firmware/source/SoftRF) &nbsp;&nbsp;**-->** ``<My Documents>``/Arduino/SoftRF <br>
+    [libraries](https://github.com/lyusupov/SoftRF/tree/master/software/firmware/source/libraries) **-->** ``<My Documents>``/Arduino/libraries <br>
+
+5. start **Arduino** application
+6. open **SoftRF** sketch from _File_ -> _Open_ menu
+7. Select _Tools_ -> _Board_ ->  _XIAO_ _nRF54L15_ _(Nrf54L15-Clean-Implementation)_
+8. Select _Tools_ -> _Upload Method_ ->  _pyOCD_ _(CMSIS-DAP)_
+9. try to build and upload using _Sketch_ -> _Upload_
+
+<br>

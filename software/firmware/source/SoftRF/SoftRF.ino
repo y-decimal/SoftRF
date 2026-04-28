@@ -38,7 +38,7 @@
  *   EasyLink library is developed by Robert Wessels and Tony Cave
  *   Dump978 library is developed by Oliver Jowett
  *   FEC library is developed by Phil Karn
- *   PCF8563, AXP20X, XPowersLib and SensorsLib libraries are developed by Lewis He
+ *   PCF8563, AXP20X, XPowersLib and SensorLib libraries are developed by Lewis He
  *   Arduino Core for STM32 is developed by Frederic Pillon
  *   TFT library is developed by Bodmer
  *   STM32duino Low Power and RTC libraries are developed by Wi6Labs
@@ -73,6 +73,7 @@
  *   ArduinoBLE library is developed by Arduino LLC
  *   Arduino Core for CH32 is developed by Tianpei Lee
  *   QMA6100P library is developed by Tristan Alderson
+ *   Arduino Core for nRF54L15 is developed by Loren Bufanu
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by

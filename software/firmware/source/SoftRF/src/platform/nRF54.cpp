@@ -43,12 +43,17 @@
 #include "../driver/OLED.h"
 #endif /* USE_OLED */
 
-#if defined(ARDUINO_XIAO_NRF54L15)
+#if defined(ARDUINO_XIAO_NRF54L15_CLEAN)    || \
+    defined(ARDUINO_HOLYIOT_25007_NRF54L15) || \
+    defined(ARDUINO_NRF54L15DK_PCA10156)    || \
+    defined(ARDUINO_GENERIC_NRF54L15_MODULE_36PIN)
 #include <variant.h>
 #include "nrf54l15_hal.h"
 
 using namespace xiao_nrf54l15;
-#endif /* ARDUINO_XIAO_NRF54L15 */
+#else
+#error "This nRF54 build variant is not supported!"
+#endif /* ARDUINO_NRF54L15 */
 
 // RFM95W pin mapping
 lmic_pinmap lmic_pins = {
@@ -71,17 +76,49 @@ static bool wdt_is_active = false;
 
 static nRF54_board_id nRF54_board = NRF54_LR2021EVK1XCS1; /* default */
 
-const char *nRF54_Device_Manufacturer = SOFTRF_IDENT;
-const char *nRF54_Device_Model = "Academy Edition";
+const char *nRF5x_Device_Manufacturer = SOFTRF_IDENT;
+const char *nRF5x_Device_Model = "Academy Edition";
+
+const char *Hardware_Rev[] = {
+  [0] = "Unknown",
+  [1] = "Unknown",
+  [2] = "Unknown",
+  [3] = "Unknown"
+};
 
 #if defined(EXCLUDE_EEPROM)
 eeprom_t eeprom_block;
 settings_t *settings = &eeprom_block.field.settings;
 #endif /* EXCLUDE_EEPROM */
 
+#if !defined(EXCLUDE_LED_RING)
+// Parameter 1 = number of pixels in strip
+// Parameter 2 = Arduino pin number (most are valid)
+// Parameter 3 = pixel type flags, add together as needed:
+//   NEO_KHZ800  800 KHz bitstream (most NeoPixel products w/WS2812 LEDs)
+//   NEO_KHZ400  400 KHz (classic 'v1' (not v2) FLORA pixels, WS2811 drivers)
+//   NEO_GRB     Pixels are wired for GRB bitstream (most NeoPixel products)
+//   NEO_RGB     Pixels are wired for RGB bitstream (v1 FLORA pixels, not v2)
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(PIX_NUM, SOC_GPIO_PIN_LED,
+                                            NEO_GRB + NEO_KHZ800);
+#endif /* EXCLUDE_LED_RING */
+
 #if defined(EXCLUDE_WIFI)
 char UDPpacketBuffer[256]; // Dummy definition to satisfy build sequence
 #endif /* EXCLUDE_WIFI */
+
+#if defined(USE_SOFTSPI)
+#include <SoftSPI.h>
+SoftSPI RadioSPI(SOC_GPIO_PIN_EVK_MOSI,
+                 SOC_GPIO_PIN_EVK_MISO,
+                 SOC_GPIO_PIN_EVK_SCK);
+#endif /* USE_SOFTSPI */
+
+#if defined(USE_RTT)
+#include <RTTStream.h>
+
+RTTStream RTTSerial;
+#endif /* USE_RTT */
 
 char *dtostrf_workaround(double number, signed char width, unsigned char prec, char *s) {
     bool negative = false;
@@ -156,6 +193,11 @@ char *dtostrf_workaround(double number, signed char width, unsigned char prec, c
     return s;
 }
 
+extern "C" time_t now_C(void)
+{
+  return now();
+}
+
 #ifdef NRF_TRUSTZONE_NONSECURE
 static constexpr uintptr_t kPowerBase = 0x4010E000UL;
 static constexpr uintptr_t kResetBase = 0x4010E000UL;
@@ -185,6 +227,25 @@ static uint8_t readGpregret0() {
   return static_cast<uint8_t>(g_power->GPREGRET[0] &
                               POWER_GPREGRET_GPREGRET_Msk);
 }
+
+#include <Adafruit_SPIFlash.h>
+static bool nRF54_has_spiflash = false;
+//static Adafruit_FlashTransport_QSPI *FlashTrans = NULL;
+static Adafruit_FlashTransport_SPI  *FlashTrans = NULL;
+static Adafruit_SPIFlash            *SPIFlash   = NULL;
+
+/// Flash device list count
+enum {
+  MX25R6435F_INDEX,
+
+  EXTERNAL_FLASH_DEVICE_COUNT
+};
+
+/// List of all possible flash devices used by nRF52840 boards
+static SPIFlash_Device_t possible_devices[] = {
+  [MX25R6435F_INDEX] = MX25R6435F,
+};
+
 
 static void nRF54_setup()
 {
@@ -229,9 +290,83 @@ static void nRF54_setup()
 #endif
   }
 
+  Wire.setPins(SOC_GPIO_PIN_EVK_SDA, SOC_GPIO_PIN_EVK_SCL);
+  Wire.begin();
+  Wire.beginTransmission(SSD1306_OLED_I2C_ADDR);
+  if (Wire.endTransmission() == 0) {
+    nRF54_board = NRF54_LR2021EVK1XCS1;
+  }
+  // Wire.end();
+
+  pinMode(SOC_GPIO_PIN_MX25_RST,  OUTPUT);
+  pinMode(SOC_GPIO_PIN_MX25_BUSY, INPUT);
+
+  digitalWrite(SOC_GPIO_PIN_MX25_RST, LOW);
+
+  delay(10);
+
+  if (digitalRead(SOC_GPIO_PIN_MX25_BUSY) == HIGH) {
+    digitalWrite(SOC_GPIO_PIN_MX25_RST, HIGH);
+
+    delay(50);
+
+    if (digitalRead(SOC_GPIO_PIN_MX25_BUSY) == LOW) {
+    nRF54_board = NRF54_MX25LE02;
+    }
+  }
+
+  pinMode(SOC_GPIO_PIN_MX25_RST, INPUT);
+
+#if defined(ARDUINO_NRF54L15DK_PCA10156)
+  /* (Q)SPI flash init */
+  switch (nRF54_board)
+  {
+    case NRF54_LR2021EVK1XCS1:
+    case NRF54_PCA10156:
+      possible_devices[MX25R6435F_INDEX].max_clock_speed_mhz  = 33;
+      possible_devices[MX25R6435F_INDEX].supports_qspi        = false;
+      possible_devices[MX25R6435F_INDEX].supports_qspi_writes = false;
+#if 0
+      FlashTrans = new Adafruit_FlashTransport_QSPI(SOC_GPIO_PIN_SFL_DK_SCK,
+                                                    SOC_GPIO_PIN_SFL_DK_SS,
+                                                    SOC_GPIO_PIN_SFL_DK_MOSI,
+                                                    SOC_GPIO_PIN_SFL_DK_MISO,
+                                                    SOC_GPIO_PIN_SFL_DK_WP,
+                                                    SOC_GPIO_PIN_SFL_DK_HOLD);
+#else
+      SPI.setPins(SOC_GPIO_PIN_EVK_SCK,
+                  SOC_GPIO_PIN_EVK_MISO,
+                  SOC_GPIO_PIN_EVK_MOSI,
+                  SOC_GPIO_PIN_SFL_DK_SS);
+      FlashTrans = new Adafruit_FlashTransport_SPI(SOC_GPIO_PIN_SFL_DK_SS, SPI);
+#endif
+      break;
+    default:
+      break;
+  }
+
+  if (FlashTrans != NULL) {
+    FlashTrans->begin();
+    FlashTrans->runCommand(0xAB); /* RDP/RES */
+    FlashTrans->end();
+
+    SPIFlash = new Adafruit_SPIFlash(FlashTrans);
+    nRF54_has_spiflash = SPIFlash->begin(possible_devices,
+                                         EXTERNAL_FLASH_DEVICE_COUNT);
+  }
+#endif /* ARDUINO_NRF54L15DK_PCA10156 */
+
+  if (nRF54_has_spiflash) {
+    nRF54_board = NRF54_PCA10156;
+    hw_info.storage = STORAGE_FLASH;
+  }
+
   switch (nRF54_board)
   {
     case NRF54_MX25LE02:
+#if !defined(USE_RTT)
+      Serial.setPins(SOC_GPIO_PIN_CONS_MX25_RX, SOC_GPIO_PIN_CONS_MX25_TX);
+#endif /* USE_RTT */
       Wire.setPins(SOC_GPIO_PIN_MX25_SDA, SOC_GPIO_PIN_MX25_SCL);
 
       lmic_pins.nss  = SOC_GPIO_PIN_MX25_SS;
@@ -251,9 +386,30 @@ static void nRF54_setup()
 
       break;
 
+#if defined(ARDUINO_NRF54L15DK_PCA10156)
+    case NRF54_PCA10156:
+#if !defined(USE_RTT)
+      Serial.setPins(SOC_GPIO_PIN_CONS_DK_RX, SOC_GPIO_PIN_CONS_DK_TX);
+#endif /* USE_RTT */
+
+      lmic_pins.nss  = SOC_GPIO_PIN_EVK_SS;
+      lmic_pins.rst  = SOC_GPIO_PIN_EVK_RST;
+      lmic_pins.busy = SOC_GPIO_PIN_EVK_BUSY;
+#if defined(USE_RADIOLIB)
+      lmic_pins.dio[0] = SOC_GPIO_PIN_EVK_DIO8;
+#endif /* USE_RADIOLIB */
+
+      pinMode(SOC_GPIO_PIN_DK_LED0,     OUTPUT);
+      digitalWrite(SOC_GPIO_PIN_DK_LED0, ! LED_STATE_ON);
+
+      break;
+#endif /* ARDUINO_NRF54L15DK_PCA10156 */
+
     case NRF54_LR2021EVK1XCS1:
     default:
-      Wire.setPins(SOC_GPIO_PIN_EVK_SDA, SOC_GPIO_PIN_EVK_SCL);
+#if !defined(USE_RTT)
+      Serial.setPins(SOC_GPIO_PIN_CONS_EVK_RX, SOC_GPIO_PIN_CONS_EVK_TX);
+#endif /* USE_RTT */
 
       lmic_pins.nss  = SOC_GPIO_PIN_EVK_SS;
       lmic_pins.rst  = SOC_GPIO_PIN_EVK_RST;
@@ -270,28 +426,57 @@ static void nRF54_setup()
       pinMode(SOC_GPIO_PIN_EVK_ANT_PWR,    OUTPUT);
       digitalWrite(SOC_GPIO_PIN_EVK_ANT_PWR, HIGH);
 
-      #if defined(ARDUINO_XIAO_NRF54L15)
+      #if defined(ARDUINO_XIAO_NRF54L15_CLEAN)
       BoardControl::setBatterySenseEnabled(true);
 
       xiaoNrf54l15SetAntenna(XIAO_NRF54L15_ANTENNA_CERAMIC);
       #else
-      pinMode(SOC_GPIO_PIN_EVK_VBAT_EN,    INPUT_PULLDOWN);
+      // pinMode(SOC_GPIO_PIN_EVK_VBAT_EN,    INPUT_PULLDOWN);
 
       pinMode(SOC_GPIO_PIN_EVK_ANT_SW,     INPUT_PULLDOWN); /* ANT 1 */
-      #endif /* ARDUINO_XIAO_NRF54L15 */
+      #endif /* ARDUINO_XIAO_NRF54L15_CLEAN */
 
       break;
   }
+
+#if !defined(USE_RTT)
+  Serial.begin(SERIAL_OUT_BR, SERIAL_OUT_BITS);
+#endif /* USE_RTT */
 }
 
 static void nRF54_post_init()
 {
-  if (nRF54_board == NRF54_LR2021EVK1XCS1) {
-    Serial.println();
-    Serial.println(F("Board: Seeed & Semtech LR2021EVK1XCS1"));
-    Serial.println();
-    Serial.flush();
-  }
+  Serial.println();
+  Serial.println(F("SoftRF Academy Edition Power-on Self Test"));
+  Serial.println();
+  Serial.flush();
+
+  Serial.print(F("Board: "));
+  Serial.println(nRF54_board == NRF54_LR2021EVK1XCS1 ?
+                 "Seeed & Semtech LR2021EVK1XCS1" : "Minewsemi MX25LE02");
+  Serial.println();
+  Serial.flush();
+
+  Serial.println(F("Built-in components:"));
+
+  Serial.print(F("RADIO   : "));
+  Serial.println(hw_info.rf      != RF_IC_NONE        ? F("PASS") : F("FAIL"));
+
+  Serial.println();
+
+  Serial.println(F("External components:"));
+
+  Serial.print(F("GNSS    : "));
+  Serial.println(hw_info.gnss    != GNSS_MODULE_NONE  ? F("PASS") : F("FAIL"));
+  Serial.print(F("BARO    : "));
+  Serial.println(hw_info.baro    != BARO_MODULE_NONE  ? F("PASS") : F("N/A"));
+  Serial.print(F("DISPLAY : "));
+  Serial.println(hw_info.display != DISPLAY_NONE      ? F("PASS") : F("N/A"));
+
+  Serial.println();
+  Serial.println(F("Power-on Self Test is complete."));
+  Serial.println();
+  Serial.flush();
 
   Serial.println(F("Data output device(s):"));
 
@@ -299,7 +484,6 @@ static void nRF54_post_init()
   switch (settings->nmea_out)
   {
     case NMEA_UART       :  Serial.println(F("UART"));          break;
-    case NMEA_USB        :  Serial.println(F("USB CDC"));       break;
     case NMEA_BLUETOOTH  :  Serial.println(F("Bluetooth LE"));  break;
     case NMEA_OFF        :
     default              :  Serial.println(F("NULL"));          break;
@@ -309,7 +493,6 @@ static void nRF54_post_init()
   switch (settings->gdl90)
   {
     case GDL90_UART      :  Serial.println(F("UART"));          break;
-    case GDL90_USB       :  Serial.println(F("USB CDC"));       break;
     case GDL90_BLUETOOTH :  Serial.println(F("Bluetooth LE"));  break;
     case GDL90_OFF       :
     default              :  Serial.println(F("NULL"));          break;
@@ -319,7 +502,6 @@ static void nRF54_post_init()
   switch (settings->d1090)
   {
     case D1090_UART      :  Serial.println(F("UART"));          break;
-    case D1090_USB       :  Serial.println(F("USB CDC"));       break;
     case D1090_BLUETOOTH :  Serial.println(F("Bluetooth LE"));  break;
     case D1090_OFF       :
     default              :  Serial.println(F("NULL"));          break;
@@ -341,10 +523,122 @@ static void nRF54_loop()
   if (wdt_is_active && g_wdt.isRunning()) {
     g_wdt.feed();
   }
+
+#if defined(NOT_AN_INTERRUPT)
+  if (SOC_GPIO_PIN_GNSS_PPS != SOC_UNUSED_PIN) {
+    static bool prev_PPS_state = LOW;
+
+    if (digitalPinToInterrupt(SOC_GPIO_PIN_GNSS_PPS) == NOT_AN_INTERRUPT) {
+      bool PPS_state = digitalRead(SOC_GPIO_PIN_GNSS_PPS);
+
+      if (PPS_state == HIGH && prev_PPS_state == LOW) {
+        PPS_TimeMarker = millis();
+      }
+      prev_PPS_state = PPS_state;
+    }
+  }
+#endif
+}
+
+static PowerManager g_powerManager;
+static uint32_t nRF54_getChipId(void);
+
+static constexpr uint8_t kSystemOffMagic = 0xA5U;
+
+static void configureButtonSenseLowWake() {
+  if (kPinUserButton.port != 0U) {
+    return;
+  }
+
+  (void)Gpio::configure(kPinUserButton, GpioDirection::kInput,
+                        nRF54_getChipId() == 0x21A44298 ? GpioPull::kPullUp :
+                        nRF54_getChipId() == 0xFCE0D9E0 ? GpioPull::kPullUp :
+                        GpioPull::kDisabled);
+
+  // SYSTEM OFF wake is done through the GPIO DETECT sense mechanism, not
+  // through a normal attachInterrupt() wake path.
+  uint32_t cnf = NRF_P0->PIN_CNF[kPinUserButton.pin];
+  cnf &= ~GPIO_PIN_CNF_SENSE_Msk;
+  cnf |= (GPIO_PIN_CNF_SENSE_Low << GPIO_PIN_CNF_SENSE_Pos);
+  if (nRF54_getChipId() == 0x21A44298 || nRF54_getChipId() == 0xFCE0D9E0) {
+    cnf |= GPIO_PIN_CNF_PULL_Pullup;
+  }
+  NRF_P0->PIN_CNF[kPinUserButton.pin] = cnf;
+}
+
+static void requestLowPowerLatencyMode() {
+  g_power->TASKS_LOWPWR = POWER_TASKS_LOWPWR_TASKS_LOWPWR_Trigger;
+}
+
+static void writeGpregret0(uint8_t value) {
+  g_power->GPREGRET[0] = static_cast<uint32_t>(value);
 }
 
 static void nRF54_fini(int reason)
 {
+  switch (nRF54_board)
+  {
+    case NRF54_MX25LE02:
+      digitalWrite(SOC_GPIO_PIN_MX25_STATUS, !LED_STATE_ON);
+      pinMode(SOC_GPIO_PIN_MX25_STATUS,      INPUT);
+
+      pinMode(SOC_GPIO_PIN_MX25_ANT_SW2,     INPUT);
+      break;
+
+    case NRF54_LR2021EVK1XCS1:
+    default:
+      digitalWrite(SOC_GPIO_PIN_EVK_STATUS,  !LED_STATE_ON);
+      pinMode(SOC_GPIO_PIN_EVK_STATUS,       INPUT);
+
+      pinMode(SOC_GPIO_PIN_EVK_BUTTON_AUX,   INPUT);
+      pinMode(SOC_GPIO_PIN_EVK_ANT_PWR,      INPUT);
+
+      #if defined(ARDUINO_XIAO_NRF54L15_CLEAN)
+      BoardControl::setBatterySenseEnabled(false);
+      #else
+      // pinMode(SOC_GPIO_PIN_EVK_VBAT_EN,      INPUT);
+      pinMode(SOC_GPIO_PIN_EVK_ANT_SW,       INPUT);
+      #endif /* ARDUINO_XIAO_NRF54L15_CLEAN */
+
+      break;
+  }
+
+  Serial_GNSS_In.end();
+  Wire.end();
+
+  pinMode(lmic_pins.nss, INPUT_PULLUP);
+  pinMode(lmic_pins.rst, INPUT);
+
+  int mode_button_pin;
+
+  switch (nRF54_board)
+  {
+    case NRF54_MX25LE02:
+      mode_button_pin = SOC_GPIO_PIN_MX25_BUTTON;
+      break;
+
+#if defined(ARDUINO_NRF54L15DK_PCA10156)
+    case NRF54_PCA10156:
+      mode_button_pin = SOC_GPIO_PIN_DK_BUTTON0;
+      break;
+#endif /* ARDUINO_NRF54L15DK_PCA10156 */
+
+    case NRF54_LR2021EVK1XCS1:
+    default:
+      mode_button_pin = SOC_GPIO_PIN_EVK_BUTTON;
+      break;
+  }
+
+  pinMode(mode_button_pin, nRF54_getChipId() == 0x21A44298 ? INPUT_PULLUP :
+                           nRF54_getChipId() == 0xFCE0D9E0 ? INPUT_PULLUP :
+                           nRF54_board  ==  NRF54_PCA10156 ? INPUT_PULLUP :
+                           INPUT);
+  while (digitalRead(mode_button_pin) == LOW);
+  delay(100);
+
+#if 0
+  Serial.end();
+
   g_regulators->SYSTEMOFF = REGULATORS_SYSTEMOFF_SYSTEMOFF_Enter;
 
   __asm volatile("dsb 0xF" ::: "memory");
@@ -352,11 +646,45 @@ static void nRF54_fini(int reason)
   while (true) {
     cpuIdleWfi();
   }
+#else
+  configureButtonSenseLowWake();
+  requestLowPowerLatencyMode();
+  writeGpregret0(kSystemOffMagic);
+
+  Serial.println("Entering SYSTEM OFF. Wake by pressing USER button.");
+  Serial.flush();
+  delay(2);
+
+#if !defined(USE_RTT)
+  Serial.end();
+#endif /* USE_RTT */
+
+  g_powerManager.systemOffNoRetention();
+#endif
 }
 
 static void nRF54_reset()
 {
-  SoftReset();
+  if (wdt_is_active && g_wdt.isRunning()) {
+    switch (hw_info.display)
+    {
+#if defined(USE_OLED)
+    case DISPLAY_OLED_1_3:
+    case DISPLAY_OLED_TTGO:
+    case DISPLAY_OLED_HELTEC:
+      OLED_fini(SOFTRF_SHUTDOWN_NONE);
+      break;
+#endif /* USE_OLED */
+
+    case DISPLAY_NONE:
+    default:
+      break;
+    }
+
+    while (true) { delay(100); }
+  } else {
+    SoftReset();
+  }
 }
 
 static uint32_t nRF54_getChipId()
@@ -418,10 +746,12 @@ static void nRF54_Sound_test(int var)
 {
 #if defined(USE_PWM_SOUND)
   if (SOC_GPIO_PIN_BUZZER != SOC_UNUSED_PIN && settings->volume != BUZZER_OFF) {
-    tone(SOC_GPIO_PIN_BUZZER, 440,  500); delay(500);
-    tone(SOC_GPIO_PIN_BUZZER, 640,  500); delay(500);
-    tone(SOC_GPIO_PIN_BUZZER, 840,  500); delay(500);
-    tone(SOC_GPIO_PIN_BUZZER, 1040, 500); delay(600);
+    pinMode(SOC_GPIO_PIN_BUZZER, OUTPUT);
+
+    tone(SOC_GPIO_PIN_BUZZER, 440,  500); // delay(500);
+    tone(SOC_GPIO_PIN_BUZZER, 640,  500); // delay(500);
+    tone(SOC_GPIO_PIN_BUZZER, 840,  500); // delay(500);
+    tone(SOC_GPIO_PIN_BUZZER, 1040, 500); // delay(600);
 
     noTone(SOC_GPIO_PIN_BUZZER);
     pinMode(SOC_GPIO_PIN_BUZZER, INPUT);
@@ -434,6 +764,7 @@ static void nRF54_Sound_tone(int hz, uint8_t volume)
 #if defined(USE_PWM_SOUND)
   if (SOC_GPIO_PIN_BUZZER != SOC_UNUSED_PIN && volume != BUZZER_OFF) {
     if (hz > 0) {
+      pinMode(SOC_GPIO_PIN_BUZZER, OUTPUT);
       tone(SOC_GPIO_PIN_BUZZER, hz, ALARM_TONE_MS);
     } else {
       noTone(SOC_GPIO_PIN_BUZZER);
@@ -473,21 +804,49 @@ static void nRF54_EEPROM_extension(int cmd)
 
 static void nRF54_SPI_begin()
 {
+#if defined(USE_SOFTSPI)
+  SPI.begin();
+#else
   switch (nRF54_board)
   {
     case NRF54_MX25LE02:
+      SPI.setPins(SOC_GPIO_PIN_MX25_SCK,
+                  SOC_GPIO_PIN_MX25_MISO,
+                  SOC_GPIO_PIN_MX25_MOSI,
+                  SOC_GPIO_PIN_MX25_SS);
       SPI.begin(SOC_GPIO_PIN_MX25_SS);
       break;
 
     case NRF54_LR2021EVK1XCS1:
+    case NRF54_PCA10156:
     default:
+      SPI.setPins(SOC_GPIO_PIN_EVK_SCK,
+                  SOC_GPIO_PIN_EVK_MISO,
+                  SOC_GPIO_PIN_EVK_MOSI,
+                  SOC_GPIO_PIN_EVK_SS);
       SPI.begin(SOC_GPIO_PIN_EVK_SS);
       break;
   }
+#endif /* USE_SOFTSPI */
 }
 
 static void nRF54_swSer_begin(unsigned long baud)
 {
+  switch (nRF54_board)
+  {
+    case NRF54_MX25LE02:
+      Serial_GNSS_In.setPins(SOC_GPIO_PIN_GNSS_MX25_RX,
+                             SOC_GPIO_PIN_GNSS_MX25_TX);
+      break;
+
+    case NRF54_LR2021EVK1XCS1:
+    case NRF54_PCA10156:
+    default:
+      Serial_GNSS_In.setPins(SOC_GPIO_PIN_GNSS_EVK_RX,
+                             SOC_GPIO_PIN_GNSS_EVK_TX);
+      break;
+  }
+
   Serial_GNSS_In.begin(baud);
 }
 
@@ -500,7 +859,9 @@ static byte nRF54_Display_setup()
 {
   byte rval = DISPLAY_NONE;
 
-  if (nRF54_board == NRF54_LR2021EVK1XCS1 || nRF54_board == NRF54_MX25LE02) {
+  if (nRF54_board == NRF54_LR2021EVK1XCS1 ||
+      nRF54_board == NRF54_MX25LE02       ||
+      nRF54_board == NRF54_PCA10156) {
 #if defined(USE_OLED)
     rval = OLED_setup();
 #endif /* USE_OLED */
@@ -568,7 +929,7 @@ static float nRF54_Battery_param(uint8_t param)
     break;
 
   case BATTERY_PARAM_CHARGE:
-#if defined(ARDUINO_XIAO_NRF54L15)
+#if defined(ARDUINO_XIAO_NRF54L15_CLEAN)
     {
       uint8_t vbatPercent = 0;
       BoardControl::sampleBatteryPercent(&vbatPercent);
@@ -589,12 +950,12 @@ static float nRF54_Battery_param(uint8_t param)
 
     voltage -= 3.6;
     rval = 10 + (voltage * 150 );
-#endif /* ARDUINO_XIAO_NRF54L15 */
+#endif /* ARDUINO_XIAO_NRF54L15_CLEAN */
     break;
 
   case BATTERY_PARAM_VOLTAGE:
   default:
-#if defined(ARDUINO_XIAO_NRF54L15)
+#if defined(ARDUINO_XIAO_NRF54L15_CLEAN)
     {
       int32_t vbatMilliVolts = 0;
       BoardControl::sampleBatteryMilliVolts(&vbatMilliVolts);
@@ -615,6 +976,7 @@ static float nRF54_Battery_param(uint8_t param)
     switch (nRF54_board)
     {
       case NRF54_MX25LE02:
+      case NRF54_PCA10156:
       case NRF54_LR2021EVK1XCS1:
       default:
         bat_adc_pin = SOC_GPIO_PIN_EVK_BATTERY;
@@ -635,7 +997,7 @@ static float nRF54_Battery_param(uint8_t param)
     // divider into account (providing the actual LIPO voltage)
     // ADC range is 0..3000mV and resolution is 12-bit (0..4095)
     voltage *= (mult * VBAT_MV_PER_LSB);
-#endif /* ARDUINO_XIAO_NRF54L15 */
+#endif /* ARDUINO_XIAO_NRF54L15_CLEAN */
     rval = voltage * 0.001;
     break;
   }
@@ -727,6 +1089,13 @@ static void nRF54_Button_setup()
     case NRF54_MX25LE02:
       mode_button_pin = SOC_GPIO_PIN_MX25_BUTTON;
       break;
+
+#if defined(ARDUINO_NRF54L15DK_PCA10156)
+    case NRF54_PCA10156:
+      mode_button_pin = SOC_GPIO_PIN_DK_BUTTON0;
+      break;
+#endif /* ARDUINO_NRF54L15DK_PCA10156 */
+
     case NRF54_LR2021EVK1XCS1:
     default:
       mode_button_pin = SOC_GPIO_PIN_EVK_BUTTON;
@@ -734,7 +1103,11 @@ static void nRF54_Button_setup()
   }
 
   // Button(s) uses external pull up resistor.
-  pinMode(mode_button_pin, INPUT);
+  pinMode(mode_button_pin, nRF54_getChipId() == 0x21A44298 ? INPUT_PULLUP :
+                           nRF54_getChipId() == 0xFCE0D9E0 ? INPUT_PULLUP :
+                           nRF54_board  ==  NRF54_PCA10156 ? INPUT_PULLUP :
+                           INPUT);
+  button_1.init(mode_button_pin, HIGH);
 
   // Configure the ButtonConfig with the event handler, and enable all higher
   // level events.
@@ -760,6 +1133,11 @@ static void nRF54_Button_loop()
 }
 
 static void nRF54_Button_fini()
+{
+
+}
+
+static void nRF54_TTS(char *message)
 {
 
 }
@@ -817,7 +1195,11 @@ const SoC_ops_t nRF54_ops = {
   nRF54_SPI_begin,
   nRF54_swSer_begin,
   nRF54_swSer_enableRx,
+#if !defined(EXCLUDE_BLUETOOTH)
+  &nRF5x_Bluetooth_ops,
+#else
   NULL,
+#endif /* EXCLUDE_BLUETOOTH */
   NULL,
   NULL,
   nRF54_Display_setup,
@@ -835,6 +1217,7 @@ const SoC_ops_t nRF54_ops = {
   nRF54_Button_setup,
   nRF54_Button_loop,
   nRF54_Button_fini,
+  nRF54_TTS,
   &nRF54_ADB_ops
 };
 

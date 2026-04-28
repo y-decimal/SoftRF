@@ -360,6 +360,10 @@ psoc4:
 nuf2:
 	$(UF2CONV) $(HEXDIR)/$(BIN_HEX) -c -f 0xada52840 -o $(HEXDIR)/$(BIN_UF2)
 
+# Nordic nRF54L15 and YAPicoprobe ( https://github.com/rgrr/yapicoprobe )
+n4uf2:
+	$(UF2CONV) $(HEXDIR)/$(BIN_HEX) -c -f 0xada54b15 -o $(HEXDIR)/$(BIN_UF2)
+
 # Microchip (Atmel) SAMD21
 suf2:
 	$(UF2CONV) $(HEXDIR)/$(BIN_HEX) -c -f 0x68ed2b88 -o $(HEXDIR)/$(BIN_UF2)
